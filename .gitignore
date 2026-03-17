@@ -1,5 +1,5 @@
 .env.local
 captures/
 logs/
-venv/
+venv
 backend/ipModel/
