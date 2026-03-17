@@ -36,24 +36,16 @@ class WelcomePage(ctk.CTkFrame):
             font=theme.font(22, 'bold'),
             text_color=theme.MUTED
         )
-        subtitle.pack(pady=(0, 18))
+        subtitle.pack(pady=(0, 26))
 
-        self.notice_label = ctk.CTkLabel(
-            center_frame,
-            text='',
-            font=theme.font(18, 'bold'),
-            text_color=theme.ORANGE,
-            wraplength=720,
-            justify='center'
-        )
-        self.notice_label.pack(pady=(0, 14))
-
+        # preserve the original look by allowing this one to auto-size from content
         tap_card = RoundedCard(
             center_frame,
             fg_color=theme.ORANGE,
             border_width=0,
-            width=360,
-            height=92
+            radius=46,
+            pad=16,
+            auto_size=True
         )
         tap_card.pack(pady=12)
         tap_body = card_body(tap_card)
@@ -65,7 +57,7 @@ class WelcomePage(ctk.CTkFrame):
             text_color=theme.WHITE,
             fg_color=theme.ORANGE
         )
-        tap_text.pack(expand=True)
+        tap_text.pack(padx=28, pady=14, expand=True)
 
         hint = ctk.CTkLabel(
             center_frame,
@@ -75,16 +67,8 @@ class WelcomePage(ctk.CTkFrame):
         )
         hint.pack(pady=(20, 0))
 
-        for widget in (
-            self, shell, shell.body, center_frame, title, subtitle,
-            tap_card, tap_card.canvas, tap_body, tap_text, hint,
-            accent, self.notice_label
-        ):
+        for widget in (self, shell, shell.body, center_frame, title, subtitle, tap_card, tap_card.canvas, tap_body, tap_text, hint, accent):
             widget.bind('<Button-1>', self.go_to_login)
 
-    def set_notice(self, message=''):
-        self.notice_label.configure(text=message or '')
-
     def go_to_login(self, event=None):
-        self.set_notice('')
         self.controller.show_frame('QRLoginPage')

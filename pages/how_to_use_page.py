@@ -46,7 +46,14 @@ class HowToUsePage(ctk.CTkFrame):
         self.shell.set_header_right(f"Welcome, {self.user_data.get('username', 'User')}!")
 
     def go_to_insert_kit(self):
-        self.controller.show_frame('KitInsertionPage', user_data=self.user_data, selected_product=self.selected_product)
+        self.stop_video()
+        self.controller.show_loading_then(
+            'Preparing reverse vending machine',
+            'KitInsertionPage',
+            delay=1000,
+            user_data=self.user_data,
+            selected_product=self.selected_product
+        )
 
     def show_video(self):
         self.video_panel.pack(pady=12)

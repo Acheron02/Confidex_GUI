@@ -180,4 +180,8 @@ class KitInsertionPage(ctk.CTkFrame):
                     page.reset_video()
                 if hasattr(page, 'reset_fields'):
                     page.reset_fields()
-        self.controller.show_frame('WelcomePage')
+        self.controller.show_loading_then(
+            'Logging Out...',
+            'WelcomePage',
+            delay=1000
+        )

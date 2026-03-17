@@ -12,6 +12,9 @@ from pages.cash_payment_page import CashPaymentPage
 from pages.receipt_page import ReceiptPage
 from pages.how_to_use_page import HowToUsePage
 from pages.kit_insertion_page import KitInsertionPage
+from frontend.components.loading import LoadingPage
+from pages.online_payment_page import OnlinePaymentPage
+from pages.dispensing_page import DispensingPage
 
 
 class App(ctk.CTk):
@@ -38,9 +41,12 @@ class App(ctk.CTk):
             PurchasePage,
             PaymentMethodPage,
             CashPaymentPage,
+            OnlinePaymentPage,
             ReceiptPage,
+            DispensingPage,
             HowToUsePage,
             KitInsertionPage,
+            LoadingPage,
         ):
             page = PageClass(self, self)
             self.frames[PageClass.__name__] = page
@@ -52,33 +58,13 @@ class App(ctk.CTk):
         try:
             self.attributes('-fullscreen', True)
         except Exception as e:
-            print("Fullscreen failed:", e)
+            print('Fullscreen failed:', e)
             try:
                 self.state('zoomed')
             except Exception as e2:
-                print("Zoomed mode failed:", e2)
-
+                print('Zoomed mode failed:', e2)
         self.lift()
         self.focus_force()
-
-    def cancel_session_and_return_home(self, message=None):
-        self.current_user = None
-
-        for page_name in ("QRLoginPage", "PurchasePage", "PaymentMethodPage", "CashPaymentPage"):
-            frame = self.frames.get(page_name)
-            if frame and hasattr(frame, "reset_fields"):
-                try:
-                    frame.reset_fields()
-                except Exception as e:
-                    print(f"Failed resetting {page_name}: {e}")
-
-        welcome = self.frames.get("WelcomePage")
-        if welcome and hasattr(welcome, "set_notice"):
-            welcome.set_notice(
-                message or "Session cancelled. Please generate a new login QR code from the website."
-            )
-
-        self.show_frame("WelcomePage")
 
     def show_frame(self, page_name, **kwargs):
         frame = self.frames.get(page_name)
@@ -94,6 +80,15 @@ class App(ctk.CTk):
                     print(f'update_data mismatch for {page_name}: {kwargs}')
 
         frame.tkraise()
+
+    def show_loading_then(self, message, next_page, delay=900, **kwargs):
+        self.show_frame(
+            'LoadingPage',
+            message=message,
+            next_page=next_page,
+            next_kwargs=kwargs,
+            delay=delay
+        )
 
 
 if __name__ == '__main__':
