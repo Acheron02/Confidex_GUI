@@ -2,11 +2,13 @@ import threading
 from frontend import tk_compat as ctk
 from frontend import theme
 from frontend.widgets import AppShell, RoundedCard, card_body
-
 from backend.util.dispenser_serial import send_dispense_command
+from config_manager import config
 
 
 class DispensingPage(ctk.CTkFrame):
+    REFRESH_MS = 1500
+
     def __init__(self, master, controller):
         super().__init__(master, fg_color=theme.CREAM)
         self.controller = controller
@@ -24,9 +26,17 @@ class DispensingPage(ctk.CTkFrame):
         self._anim_job = None
         self._anim_running = False
         self._dot_count = 0
-        self._base_text = "Please wait, your item is being dispensed"
+        self._base_text = config.get(
+            "dispensing_page",
+            "message_text",
+            default="Please wait, your item is being dispensed"
+        )
+        self._config_refresh_job = None
 
-        self.shell = AppShell(self, title_right="Dispensing Item")
+        self.shell = AppShell(
+            self,
+            title_right=config.get("dispensing_page", "header_title", default="Dispensing Item")
+        )
         self.shell.pack(fill="both", expand=True)
 
         content_wrap = ctk.CTkFrame(self.shell.body, fg_color="transparent")
@@ -42,7 +52,7 @@ class DispensingPage(ctk.CTkFrame):
 
         self.title_label = ctk.CTkLabel(
             body,
-            text="DISPENSING ITEM",
+            text=config.get("dispensing_page", "title", default="DISPENSING ITEM"),
             font=theme.heavy(30),
             text_color=theme.BLACK,
             fg_color=theme.WHITE
@@ -62,7 +72,11 @@ class DispensingPage(ctk.CTkFrame):
 
         self.details_label = ctk.CTkLabel(
             body,
-            text="Preparing dispense command...",
+            text=config.get(
+                "dispensing_page",
+                "preparing_command_text",
+                default="Preparing dispense command..."
+            ),
             font=theme.font(18, "bold"),
             text_color=theme.MUTED,
             fg_color=theme.WHITE,
@@ -81,6 +95,27 @@ class DispensingPage(ctk.CTkFrame):
             justify="center"
         )
         self.status_label.grid(row=3, column=0, padx=20, pady=(0, 14), sticky="ew")
+
+        self._start_config_refresh()
+
+    def _refresh_from_config(self):
+        try:
+            self._base_text = config.get(
+                "dispensing_page",
+                "message_text",
+                default="Please wait, your item is being dispensed"
+            )
+            self.title_label.configure(
+                text=config.get("dispensing_page", "title", default="DISPENSING ITEM")
+            )
+            if not self.processing:
+                self.message_label.configure(text=self._base_text)
+        except Exception as e:
+            print(f"[DISPENSING] Config refresh failed: {e}", flush=True)
+
+    def _start_config_refresh(self):
+        self._refresh_from_config()
+        self._config_refresh_job = self.after(self.REFRESH_MS, self._start_config_refresh)
 
     def update_data(
         self,
@@ -127,16 +162,14 @@ class DispensingPage(ctk.CTkFrame):
         self.message_label.configure(text=self._base_text, text_color=theme.INFO)
         self.details_label.configure(
             text=(
-                f"User: {username}\n"
-                f"Item: {product_name}\n"
-                f"Product ID: {product_id}\n"
-                f"Transaction ID: {self.transaction_id or 'N/A'}\n"
-                f"Please do not leave while dispensing is in progress."
+                f"{config.get('dispensing_page', 'user_label', default='User')}: {username}\n"
+                f"{config.get('dispensing_page', 'item_label', default='Item')}: {product_name}\n"
+                f"{config.get('dispensing_page', 'product_id_label', default='Product ID')}: {product_id}\n"
+                f"{config.get('dispensing_page', 'transaction_id_label', default='Transaction ID')}: {self.transaction_id or 'N/A'}\n"
+                f"{config.get('dispensing_page', 'do_not_leave_text', default='Please do not leave while dispensing is in progress.')}"
             )
         )
         self.status_label.configure(text="", text_color=theme.MUTED)
-
-        print(f"[DISPENSE] update_data transaction_id={self.transaction_id}", flush=True)
 
         self.start_animation()
         self.after(200, self.start_dispensing)
@@ -177,21 +210,42 @@ class DispensingPage(ctk.CTkFrame):
         message = result.get("message", "")
 
         if success:
+            product_id = (
+                self.product.get("productID")
+                or self.product.get("product_id")
+                or self.product.get("id")
+            )
+            if product_id:
+                try:
+                    config.decrement_product_stock(str(product_id), 1)
+                except Exception as e:
+                    print(f"[DISPENSING] Failed to decrement stock: {e}", flush=True)
+
             self.message_label.configure(
-                text="Item dispensed successfully",
+                text=config.get(
+                    "dispensing_page",
+                    "success_title_text",
+                    default="Item dispensed successfully"
+                ),
                 text_color=theme.SUCCESS
             )
             self.status_label.configure(
-                text=message or "Dispensing completed successfully.",
+                text=message or config.get(
+                    "dispensing_page",
+                    "success_status_text",
+                    default="Dispensing completed successfully."
+                ),
                 text_color=theme.SUCCESS
             )
-            print(f"[DISPENSE] success: {result}", flush=True)
-            print(f"[DISPENSE] forwarding to HowToUsePage transaction_id={self.transaction_id}", flush=True)
 
             self.after(
-                1500,
+                int(config.get("dispensing_page", "next_page_delay_ms", default=1500)),
                 lambda: self.controller.show_loading_then(
-                    "Loading instructions",
+                    config.get(
+                        "dispensing_page",
+                        "next_loading_text",
+                        default="Loading instructions"
+                    ),
                     "HowToUsePage",
                     delay=800,
                     user_data=self.user_data,
@@ -201,28 +255,38 @@ class DispensingPage(ctk.CTkFrame):
             )
         else:
             self.message_label.configure(
-                text="Dispensing failed",
+                text=config.get(
+                    "dispensing_page",
+                    "failed_title_text",
+                    default="Dispensing failed"
+                ),
                 text_color=theme.ERROR
             )
             self.status_label.configure(
-                text=message or "Failed to dispense item.",
+                text=message or config.get(
+                    "dispensing_page",
+                    "failed_status_text",
+                    default="Failed to dispense item."
+                ),
                 text_color=theme.ERROR
             )
-            print(f"[DISPENSE] failed: {result}", flush=True)
 
     def _on_dispense_error(self, error_message):
         self.processing = False
         self.stop_animation()
 
         self.message_label.configure(
-            text="Dispensing failed",
+            text=config.get(
+                "dispensing_page",
+                "failed_title_text",
+                default="Dispensing failed"
+            ),
             text_color=theme.ERROR
         )
         self.status_label.configure(
-            text=f"Error: {error_message}",
+            text=f"{config.get('dispensing_page', 'error_prefix', default='Error:')} {error_message}",
             text_color=theme.ERROR
         )
-        print(f"[DISPENSE] error: {error_message}", flush=True)
 
     def start_animation(self):
         self.stop_animation()

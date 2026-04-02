@@ -5,50 +5,53 @@ import requests
 from frontend import theme
 from frontend.widgets import AppShell, RoundedCard, card_body
 from backend.util import api_client
+from config_manager import config
 
 
 class QRLoginPage(ctk.CTkFrame):
     def __init__(self, master, controller=None):
         super().__init__(master, fg_color=theme.CREAM)
         self.controller = controller
-        self.buffer = ''
+        self.buffer = ""
         self.disabled = False
         self.processing = False
         self.listener = None
 
-        self._waiting_base_text = 'Waiting for QR scan'
+        self._waiting_base_text = config.get(
+            "qr_login_page",
+            "waiting_base_text",
+            default="Waiting for QR scan"
+        )
         self._waiting_dots = 0
         self._waiting_anim_job = None
         self._waiting_anim_running = False
+        self._config_refresh_job = None
 
         self.shell = AppShell(self)
-        self.shell.pack(fill='both', expand=True)
+        self.shell.pack(fill="both", expand=True)
 
-        content_wrap = ctk.CTkFrame(self.shell.body, fg_color='transparent')
-        content_wrap.pack(expand=True, fill='both')
+        content_wrap = ctk.CTkFrame(self.shell.body, fg_color="transparent")
+        content_wrap.pack(expand=True, fill="both")
 
         content_wrap.grid_columnconfigure(0, weight=1)
         content_wrap.grid_rowconfigure(0, weight=1)
         content_wrap.grid_rowconfigure(1, weight=0)
-        content_wrap.grid_rowconfigure(2, weight=1) # Adjusted weight to keep card centered
+        content_wrap.grid_rowconfigure(2, weight=1)
 
-        # Main Square Page (Bigger)
         self.card = RoundedCard(content_wrap, pad=50, auto_size=True)
         self.card.grid(row=1, column=0)
 
         body = card_body(self.card)
 
-        # 1. Main Title
         self.title_label = ctk.CTkLabel(
             body,
-            text='SCAN QR TO LOGIN',
-            font=theme.font(32, 'bold'),
+            text=config.get("qr_login_page", "title", default="SCAN QR TO LOGIN"),
+            font=theme.font(32, "bold"),
             text_color=theme.BLACK,
             fg_color=theme.WHITE
         )
         self.title_label.pack(padx=20, pady=(25, 10))
 
-        # 2. Instruction Box (Gray Outline Only)
         self.instruction_box = ctk.CTkFrame(
             body,
             fg_color="transparent",
@@ -63,40 +66,86 @@ class QRLoginPage(ctk.CTkFrame):
 
         self.instruction_text = ctk.CTkLabel(
             self.instruction_box,
-            text="Sign in/up your account in our website to generate a QR",
-            font=theme.font(16, 'bold'),
+            text=config.get(
+                "qr_login_page",
+                "instruction_text",
+                default="Sign in or sign up on our website to generate a QR code"
+            ),
+            font=theme.font(16, "bold"),
             text_color=theme.GRAY,
             wraplength=420,
-            justify='center'
+            justify="center"
         )
-        self.instruction_text.place(relx=0.5, rely=0.5, anchor='center')
+        self.instruction_text.place(relx=0.5, rely=0.5, anchor="center")
 
-        # 3. Scanning Result Label (Inside the card)
         self.result_label = ctk.CTkLabel(
             body,
-            text='Waiting for QR scan...',
-            font=theme.font(24, 'bold'),
+            text=config.get(
+                "qr_login_page",
+                "waiting_text",
+                default="Waiting for QR scan..."
+            ),
+            font=theme.font(24, "bold"),
             text_color=theme.MUTED,
             wraplength=480,
-            justify='center',
+            justify="center",
             fg_color=theme.WHITE
         )
         self.result_label.pack(padx=20, pady=(10, 5))
 
-        # 4. FIXED: Status Label moved INSIDE the card body
         self.status_label = ctk.CTkLabel(
             body,
-            text='',
-            font=theme.font(18, 'bold'),
+            text="",
+            font=theme.font(18, "bold"),
             text_color=theme.INFO,
             wraplength=480,
-            justify='center',
-            fg_color='transparent'
+            justify="center",
+            fg_color="transparent"
         )
         self.status_label.pack(padx=20, pady=(0, 25))
 
         self.start_waiting_animation()
         self.start_key_listener()
+        self._start_config_refresh()
+
+    def _refresh_from_config(self):
+        try:
+            self._waiting_base_text = config.get(
+                "qr_login_page",
+                "waiting_base_text",
+                default="Waiting for QR scan"
+            )
+
+            self.title_label.configure(
+                text=config.get(
+                    "qr_login_page",
+                    "title",
+                    default="SCAN QR TO LOGIN"
+                )
+            )
+
+            self.instruction_text.configure(
+                text=config.get(
+                    "qr_login_page",
+                    "instruction_text",
+                    default="Sign in or sign up on our website to generate a QR code"
+                )
+            )
+
+            if not self.processing and not self.disabled:
+                self.result_label.configure(
+                    text=config.get(
+                        "qr_login_page",
+                        "waiting_text",
+                        default="Waiting for QR scan..."
+                    )
+                )
+        except Exception as e:
+            print(f"[QR LOGIN] Config refresh failed: {e}", flush=True)
+
+    def _start_config_refresh(self):
+        self._refresh_from_config()
+        self._config_refresh_job = self.after(1000, self._start_config_refresh)
 
     def start_waiting_animation(self):
         self.stop_waiting_animation()
@@ -118,9 +167,9 @@ class QRLoginPage(ctk.CTkFrame):
             return
 
         self._waiting_dots = (self._waiting_dots + 1) % 4
-        dots = '.' * self._waiting_dots
+        dots = "." * self._waiting_dots
         self.result_label.configure(
-            text=f'{self._waiting_base_text}{dots}',
+            text=f"{self._waiting_base_text}{dots}",
             text_color=theme.MUTED
         )
         self._waiting_anim_job = self.after(450, self._animate_waiting_text)
@@ -139,7 +188,7 @@ class QRLoginPage(ctk.CTkFrame):
             except AttributeError:
                 if key == keyboard.Key.enter:
                     scanned = self.buffer.strip()
-                    self.buffer = ''
+                    self.buffer = ""
 
                     if not scanned or self.processing:
                         return
@@ -159,19 +208,36 @@ class QRLoginPage(ctk.CTkFrame):
     def show_loading(self):
         self.stop_waiting_animation()
         self.status_label.configure(
-            text='Validating QR... Please wait',
+            text=config.get(
+                "qr_login_page",
+                "validating_text",
+                default="Validating QR... Please wait"
+            ),
             text_color=theme.ORANGE
         )
-        self.result_label.configure(text='')
+        self.result_label.configure(text="")
 
     def process_scan(self, scanned_code):
         if self.disabled:
             return
 
-        if not scanned_code.startswith('LOGIN-'):
+        if not scanned_code.startswith("LOGIN-"):
             def invalid_qr():
-                self.status_label.configure(text='Not a login QR code', text_color=theme.ERROR)
-                self.result_label.configure(text='Scan a valid login QR code')
+                self.status_label.configure(
+                    text=config.get(
+                        "qr_login_page",
+                        "invalid_qr_status",
+                        default="Not a login QR code"
+                    ),
+                    text_color=theme.ERROR
+                )
+                self.result_label.configure(
+                    text=config.get(
+                        "qr_login_page",
+                        "invalid_qr_result",
+                        default="Scan a valid login QR code"
+                    )
+                )
                 self.processing = False
                 self.start_waiting_animation()
 
@@ -184,30 +250,50 @@ class QRLoginPage(ctk.CTkFrame):
             try:
                 data = response.json()
             except ValueError:
-                data = {'error': f'Non-JSON response ({response.status_code})'}
+                data = {"error": f"Non-JSON response ({response.status_code})"}
 
-            if response.ok and data.get('user'):
-                user = data['user']
+            if response.ok and data.get("user"):
+                user = data["user"]
                 user_data = {
-                    'username': user.get('username', 'User'),
-                    'userID': user.get('_id')
+                    "username": user.get("username", "User"),
+                    "userID": user.get("_id")
                 }
 
                 def success():
-                    self.status_label.configure(text='Login successful', text_color=theme.SUCCESS)
-                    self.result_label.configure(text=f"Logged in as: {user_data['username']}")
+                    self.status_label.configure(
+                        text=config.get(
+                            "qr_login_page",
+                            "login_success_status",
+                            default="Login successful"
+                        ),
+                        text_color=theme.SUCCESS
+                    )
+                    self.result_label.configure(
+                        text=f"{config.get('qr_login_page', 'login_success_prefix', default='Logged in as:')} {user_data['username']}"
+                    )
                     self.disable_page()
                     self.redirect_to_purchase(user_data)
 
                 self.after(0, success)
 
             else:
-                err = data.get('error') or 'Login failed'
+                err = data.get("error") or config.get(
+                    "qr_login_page",
+                    "login_failed_result",
+                    default="Login failed"
+                )
 
                 def fail():
                     if self.disabled:
                         return
-                    self.status_label.configure(text='Login failed', text_color=theme.ERROR)
+                    self.status_label.configure(
+                        text=config.get(
+                            "qr_login_page",
+                            "login_failed_status",
+                            default="Login failed"
+                        ),
+                        text_color=theme.ERROR
+                    )
                     self.result_label.configure(text=err)
                     self.processing = False
                     self.start_waiting_animation()
@@ -215,12 +301,19 @@ class QRLoginPage(ctk.CTkFrame):
                 self.after(0, fail)
 
         except requests.RequestException as e:
-            error_message = f'Request failed: {e}'
+            error_message = f"{config.get('qr_login_page', 'network_error_prefix', default='Request failed:')} {e}"
 
             def network_fail():
                 if self.disabled:
                     return
-                self.status_label.configure(text='Network error', text_color=theme.ERROR)
+                self.status_label.configure(
+                    text=config.get(
+                        "qr_login_page",
+                        "network_error_status",
+                        default="Network error"
+                    ),
+                    text_color=theme.ERROR
+                )
                 self.result_label.configure(text=error_message)
                 self.processing = False
                 self.start_waiting_animation()
@@ -239,10 +332,10 @@ class QRLoginPage(ctk.CTkFrame):
     def redirect_to_purchase(self, user_data):
         if self.controller:
             self.controller.current_user = user_data
-            self.controller.show_frame('PurchasePage', user_data=user_data)
+            self.controller.show_frame("PurchasePage", user_data=user_data)
 
     def reset_fields(self, **kwargs):
-        self.buffer = ''
+        self.buffer = ""
         self.disabled = False
         self.processing = False
 
@@ -250,7 +343,14 @@ class QRLoginPage(ctk.CTkFrame):
             self.listener.stop()
             self.listener = None
 
-        self.status_label.configure(text='', text_color=theme.INFO)
-        self.result_label.configure(text='Waiting for QR scan...', text_color=theme.MUTED)
+        self.status_label.configure(text="", text_color=theme.INFO)
+        self.result_label.configure(
+            text=config.get(
+                "qr_login_page",
+                "waiting_text",
+                default="Waiting for QR scan..."
+            ),
+            text_color=theme.MUTED
+        )
         self.start_waiting_animation()
         self.start_key_listener()

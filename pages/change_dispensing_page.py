@@ -1,6 +1,7 @@
 from frontend import tk_compat as ctk
 from frontend import theme
 from frontend.widgets import AppShell, RoundedCard, PillButton, card_body
+from config_manager import config
 
 import threading
 
@@ -8,6 +9,8 @@ from backend.util.dispenser_serial import send_change_command
 
 
 class ChangeDispensingPage(ctk.CTkFrame):
+    REFRESH_MS = 1500
+
     def __init__(self, master, controller):
         super().__init__(master, fg_color=theme.CREAM)
         self.controller = controller
@@ -36,8 +39,21 @@ class ChangeDispensingPage(ctk.CTkFrame):
         self._dot_job = None
         self._dot_count = 0
         self._animating = False
+        self._config_refresh_job = None
+        self._base_status_text = config.get(
+            "change_dispensing_page",
+            "dispensing_status_base_text",
+            default="Dispensing coins"
+        )
 
-        self.shell = AppShell(self, title_right="Dispensing Change")
+        self.shell = AppShell(
+            self,
+            title_right=config.get(
+                "change_dispensing_page",
+                "header_title",
+                default="Dispensing Change"
+            )
+        )
         self.shell.pack(fill="both", expand=True)
 
         top_bar = ctk.CTkFrame(self.shell.body, fg_color="transparent")
@@ -48,7 +64,7 @@ class ChangeDispensingPage(ctk.CTkFrame):
 
         self.back_btn = PillButton(
             top_bar,
-            text="Back",
+            text=config.get("change_dispensing_page", "back_button_text", default="Back"),
             width=130,
             height=58,
             command=self.go_back,
@@ -58,7 +74,7 @@ class ChangeDispensingPage(ctk.CTkFrame):
 
         self.page_title = ctk.CTkLabel(
             top_bar,
-            text="DISPENSING CHANGE",
+            text=config.get("change_dispensing_page", "title", default="DISPENSING CHANGE"),
             font=theme.heavy(32),
             text_color=theme.BLACK
         )
@@ -79,7 +95,11 @@ class ChangeDispensingPage(ctk.CTkFrame):
 
         self.title_label = ctk.CTkLabel(
             body,
-            text="PLEASE COLLECT YOUR CHANGE",
+            text=config.get(
+                "change_dispensing_page",
+                "main_title",
+                default="PLEASE COLLECT YOUR CHANGE"
+            ),
             font=theme.heavy(30),
             text_color=theme.BLACK,
             fg_color=theme.WHITE
@@ -98,7 +118,11 @@ class ChangeDispensingPage(ctk.CTkFrame):
 
         self.info_label = ctk.CTkLabel(
             body,
-            text="The machine is preparing your coins.",
+            text=config.get(
+                "change_dispensing_page",
+                "info_text",
+                default="The machine is preparing your coins."
+            ),
             font=theme.font(20, "bold"),
             text_color=theme.MUTED,
             fg_color=theme.WHITE,
@@ -109,7 +133,11 @@ class ChangeDispensingPage(ctk.CTkFrame):
 
         self.status_label = ctk.CTkLabel(
             body,
-            text="Starting coin dispensing...",
+            text=config.get(
+                "change_dispensing_page",
+                "starting_status_text",
+                default="Starting coin dispensing..."
+            ),
             font=theme.font(20, "bold"),
             text_color=theme.INFO,
             fg_color=theme.WHITE,
@@ -142,7 +170,11 @@ class ChangeDispensingPage(ctk.CTkFrame):
 
         self.continue_btn = PillButton(
             body,
-            text="Continue to Receipt",
+            text=config.get(
+                "change_dispensing_page",
+                "continue_button_text",
+                default="Continue to Receipt"
+            ),
             width=240,
             height=56,
             command=self._redirect_to_receipt,
@@ -150,6 +182,49 @@ class ChangeDispensingPage(ctk.CTkFrame):
         )
         self.continue_btn.grid(row=6, column=0, pady=(6, 24))
         self.continue_btn.configure(state="disabled")
+
+        self._start_config_refresh()
+
+    def _refresh_from_config(self):
+        try:
+            self._base_status_text = config.get(
+                "change_dispensing_page",
+                "dispensing_status_base_text",
+                default="Dispensing coins"
+            )
+            self.back_btn.configure(
+                text=config.get("change_dispensing_page", "back_button_text", default="Back")
+            )
+            self.page_title.configure(
+                text=config.get("change_dispensing_page", "title", default="DISPENSING CHANGE")
+            )
+            self.title_label.configure(
+                text=config.get(
+                    "change_dispensing_page",
+                    "main_title",
+                    default="PLEASE COLLECT YOUR CHANGE"
+                )
+            )
+            self.info_label.configure(
+                text=config.get(
+                    "change_dispensing_page",
+                    "info_text",
+                    default="The machine is preparing your coins."
+                )
+            )
+            self.continue_btn.configure(
+                text=config.get(
+                    "change_dispensing_page",
+                    "continue_button_text",
+                    default="Continue to Receipt"
+                )
+            )
+        except Exception as e:
+            print(f"[CHANGE] Config refresh failed: {e}", flush=True)
+
+    def _start_config_refresh(self):
+        self._refresh_from_config()
+        self._config_refresh_job = self.after(self.REFRESH_MS, self._start_config_refresh)
 
     def update_data(
         self,
@@ -169,8 +244,6 @@ class ChangeDispensingPage(ctk.CTkFrame):
         transaction_id=None,
         **kwargs
     ):
-        print("[CHANGE] update_data called", flush=True)
-
         self.user_data = user_data or {}
         self.product = product or kwargs.get("selected_product") or {}
         self.discount = float(discount or 0)
@@ -196,25 +269,23 @@ class ChangeDispensingPage(ctk.CTkFrame):
         self.shell.set_header_right(f"Welcome, {username}!")
 
         self.amount_label.configure(text=f"₱{self.change:.2f}")
-        self.info_label.configure(
-            text=(
-                "Please wait while the machine dispenses your change.\n"
-                "Collect all coins from the tray before proceeding."
-            )
-        )
         self.breakdown_label.configure(text="")
         self.stock_label.configure(text="")
         self.continue_btn.configure(state="disabled")
 
         if self.change <= 0:
             self.status_label.configure(
-                text="No change to dispense. Redirecting to receipt...",
+                text=config.get(
+                    "change_dispensing_page",
+                    "no_change_text",
+                    default="No change to dispense. Redirecting to receipt..."
+                ),
                 text_color=theme.SUCCESS
             )
             self.after(700, self._redirect_to_receipt)
             return
 
-        self._start_status_animation("Dispensing coins", theme.INFO)
+        self._start_status_animation(self._base_status_text, theme.INFO)
         self.after(150, self._start_dispensing_once)
 
     def _start_dispensing_once(self):
@@ -226,15 +297,9 @@ class ChangeDispensingPage(ctk.CTkFrame):
     def _dispense_change_thread(self):
         try:
             amount = int(round(self.change))
-            print(f"[CHANGE] Sending change command for amount={amount}", flush=True)
-
             result = send_change_command(amount)
-            print(f"[CHANGE] send_change_command result={result}", flush=True)
-
             self.after(0, lambda r=result: self._on_dispense_finished(r))
-
         except Exception as e:
-            print(f"[CHANGE] dispense thread exception: {e}", flush=True)
             self.after(0, lambda err=str(e): self._on_dispense_failed(err))
 
     def _on_dispense_finished(self, result):
@@ -244,29 +309,48 @@ class ChangeDispensingPage(ctk.CTkFrame):
 
         success = bool(self.result.get("success"))
         message = str(self.result.get("message") or "")
-        stock = self.result.get("stock") or {}
 
         if success:
+            breakdown = self._extract_breakdown(message)
+            parsed_breakdown = self._parse_breakdown_dict(breakdown)
+
+            if parsed_breakdown:
+                try:
+                    applied = config.apply_change_breakdown(parsed_breakdown)
+                    if not applied:
+                        print("[CHANGE] Failed to deduct coin stock from inventory.json", flush=True)
+                except Exception as e:
+                    print(f"[CHANGE] Inventory deduction failed: {e}", flush=True)
+
             self.status_label.configure(
-                text="Change dispensed successfully.",
+                text=config.get(
+                    "change_dispensing_page",
+                    "success_status_text",
+                    default="Change dispensed successfully."
+                ),
                 text_color=theme.SUCCESS
             )
 
-            breakdown = self._extract_breakdown(message)
             if breakdown:
                 self.breakdown_label.configure(
-                    text=f"Dispensed coins: {breakdown}",
+                    text=(
+                        f"{config.get('change_dispensing_page', 'dispensed_prefix', default='Dispensed coins')}: "
+                        f"{breakdown}"
+                    ),
                     text_color=theme.BLACK
                 )
             else:
                 self.breakdown_label.configure(
-                    text=message or "Coin dispensing completed.",
+                    text=config.get(
+                        "change_dispensing_page",
+                        "coin_dispense_complete_text",
+                        default="Coin dispensing completed."
+                    ),
                     text_color=theme.BLACK
                 )
 
-            stock_text = self._format_stock(stock)
             self.stock_label.configure(
-                text=stock_text if stock_text else "",
+                text=self._format_stock_from_inventory(),
                 text_color=theme.MUTED
             )
 
@@ -274,23 +358,31 @@ class ChangeDispensingPage(ctk.CTkFrame):
 
             if not self.redirect_scheduled:
                 self.redirect_scheduled = True
-                self.after(1200, self._redirect_to_receipt)
+                self.after(
+                    int(config.get("change_dispensing_page", "auto_redirect_delay_ms", default=1200)),
+                    self._redirect_to_receipt
+                )
         else:
             self.status_label.configure(
-                text="Coin dispensing failed.",
+                text=config.get(
+                    "change_dispensing_page",
+                    "failed_status_text",
+                    default="Coin dispensing failed."
+                ),
                 text_color=theme.ERROR
             )
             self.breakdown_label.configure(
-                text=message or "The machine did not confirm change dispensing.",
+                text=message or config.get(
+                    "change_dispensing_page",
+                    "dispense_failed_text",
+                    default="The machine did not confirm change dispensing."
+                ),
                 text_color=theme.ERROR
             )
-
-            stock_text = self._format_stock(stock)
             self.stock_label.configure(
-                text=stock_text if stock_text else "",
+                text=self._format_stock_from_inventory(),
                 text_color=theme.MUTED
             )
-
             self.continue_btn.configure(state="normal")
 
     def _on_dispense_failed(self, error_text):
@@ -298,14 +390,22 @@ class ChangeDispensingPage(ctk.CTkFrame):
         self._stop_status_animation()
 
         self.status_label.configure(
-            text="Coin dispensing failed.",
+            text=config.get(
+                "change_dispensing_page",
+                "failed_status_text",
+                default="Coin dispensing failed."
+            ),
             text_color=theme.ERROR
         )
         self.breakdown_label.configure(
-            text=error_text or "Unknown dispensing error.",
+            text=error_text or config.get(
+                "change_dispensing_page",
+                "unknown_error_text",
+                default="Unknown dispensing error."
+            ),
             text_color=theme.ERROR
         )
-        self.stock_label.configure(text="")
+        self.stock_label.configure(text=self._format_stock_from_inventory())
         self.continue_btn.configure(state="normal")
 
     def _extract_breakdown(self, message: str) -> str:
@@ -314,31 +414,47 @@ class ChangeDispensingPage(ctk.CTkFrame):
             return upper.split(":", 1)[1].strip()
         return ""
 
-    def _format_stock(self, stock: dict) -> str:
-        if not isinstance(stock, dict) or not stock:
-            return ""
+    def _parse_breakdown_dict(self, breakdown: str) -> dict:
+        result = {}
+        if not breakdown:
+            return result
 
-        count1 = stock.get(1, stock.get("1"))
-        count5 = stock.get(5, stock.get("5"))
-        count20 = stock.get(20, stock.get("20"))
+        parts = [p.strip() for p in breakdown.split(",") if p.strip()]
+        for part in parts:
+            if "x" not in part:
+                continue
+
+            left, right = part.split("x", 1)
+            try:
+                denom = int(left.strip())
+                qty = int(right.strip())
+                if qty > 0:
+                    result[denom] = qty
+            except Exception:
+                continue
+
+        return result
+
+    def _format_stock_from_inventory(self) -> str:
+        coins = config.get_coin_inventory()
+        if not coins:
+            return ""
 
         parts = []
-        if count1 is not None:
-            parts.append(f"₱1: {count1}")
-        if count5 is not None:
-            parts.append(f"₱5: {count5}")
-        if count20 is not None:
-            parts.append(f"₱20: {count20}")
+        for coin in coins:
+            denom = coin.get("denomination")
+            stock = coin.get("stock")
+            parts.append(f"₱{denom}: {stock}")
 
-        if not parts:
-            return ""
+        return (
+            f"{config.get('change_dispensing_page', 'remaining_stock_prefix', default='Remaining coin stock')}: "
+            + " | ".join(parts)
+        )
 
-        return "Remaining coin stock: " + " | ".join(parts)
-
-    def _start_status_animation(self, base_text="Dispensing coins", color=None):
+    def _start_status_animation(self, base_text=None, color=None):
         self._stop_status_animation()
         self._animating = True
-        self._base_status_text = base_text
+        self._base_status_text = base_text or self._base_status_text
         self._status_color = color or theme.INFO
         self._dot_count = 0
         self._animate_status_text()
@@ -373,10 +489,12 @@ class ChangeDispensingPage(ctk.CTkFrame):
         self._redirect_to_receipt()
 
     def _redirect_to_receipt(self):
-        print(f"[CHANGE] Redirecting to ReceiptPage | transaction_id={self.transaction_id}", flush=True)
-
         self.controller.show_loading_then(
-            "Preparing receipt",
+            config.get(
+                "change_dispensing_page",
+                "receipt_loading_text",
+                default="Preparing receipt"
+            ),
             "ReceiptPage",
             delay=800,
             user_data=self.user_data,

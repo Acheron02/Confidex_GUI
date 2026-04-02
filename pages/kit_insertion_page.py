@@ -15,33 +15,53 @@ from backend.util.capture_manager import (
     get_session_timestamp,
     save_capture_set,
 )
+from config_manager import config
 
 
 class KitInsertionPage(ctk.CTkFrame):
+    REFRESH_MS = 1500
+
     def __init__(self, master, controller):
         super().__init__(master, fg_color=theme.CREAM)
         self.controller = controller
         self.user_data = {}
         self.selected_product = None
         self.transaction_id = None
+        self._config_refresh_job = None
 
-        model_path = os.path.join(
-            os.path.dirname(os.path.dirname(__file__)),
-            "backend",
-            "ipModel",
-            "latesttrain.pt"
+        model_path = config.get(
+            "kit_insertion_page",
+            "model_path",
+            default=os.path.join(
+                os.path.dirname(os.path.dirname(__file__)),
+                "backend",
+                "ipModel",
+                "latesttrain.pt"
+            )
         )
         self.model = YOLO(model_path)
 
-        self.shell = AppShell(self, title_right="Reverse Vending Machine")
+        self.shell = AppShell(
+            self,
+            title_right=config.get(
+                "kit_insertion_page",
+                "header_title",
+                default="Reverse Vending Machine"
+            )
+        )
         self.shell.pack(fill="both", expand=True)
 
-        ctk.CTkLabel(
+        self.title_label = ctk.CTkLabel(
             self.shell.body,
-            text="REVERSE VENDING MACHINE",
+            text=config.get(
+                "kit_insertion_page",
+                "title",
+                default="REVERSE VENDING MACHINE"
+            ),
             font=theme.heavy(30),
             text_color=theme.BLACK
-        ).pack(pady=(18, 10))
+        )
+        self.title_label.pack(pady=(18, 10))
 
         self.card = RoundedCard(self.shell.body)
         self.card.pack(fill="both", expand=True, padx=24, pady=16)
@@ -61,7 +81,11 @@ class KitInsertionPage(ctk.CTkFrame):
 
         self.result_label = ctk.CTkLabel(
             body,
-            text="Insert your test kit",
+            text=config.get(
+                "kit_insertion_page",
+                "initial_text",
+                default="Insert your test kit"
+            ),
             font=theme.font(28, "bold"),
             text_color=theme.BLACK,
             fg_color=theme.WHITE
@@ -70,7 +94,11 @@ class KitInsertionPage(ctk.CTkFrame):
 
         self.insert_btn = PillButton(
             body,
-            text="Confirm Insertion",
+            text=config.get(
+                "kit_insertion_page",
+                "confirm_button_text",
+                default="Confirm Insertion"
+            ),
             command=lambda: self.capture_image(run_yolo=True),
             width=280,
             font=theme.font(18, "bold")
@@ -80,15 +108,51 @@ class KitInsertionPage(ctk.CTkFrame):
         self.cap = None
         self.running = False
         self._after_id = None
+        self._captured_frame = None
+
+        self._start_config_refresh()
+
+    def _refresh_from_config(self):
+        try:
+            self.title_label.configure(
+                text=config.get(
+                    "kit_insertion_page",
+                    "title",
+                    default="REVERSE VENDING MACHINE"
+                )
+            )
+            self.insert_btn.configure(
+                text=config.get(
+                    "kit_insertion_page",
+                    "confirm_button_text",
+                    default="Confirm Insertion"
+                )
+            )
+        except Exception as e:
+            print(f"[KIT] Config refresh failed: {e}", flush=True)
+
+    def _start_config_refresh(self):
+        self._refresh_from_config()
+        self._config_refresh_job = self.after(self.REFRESH_MS, self._start_config_refresh)
 
     def start_camera(self):
+        camera_index = int(config.get("kit_insertion_page", "camera_index", default=0))
+        frame_width = int(config.get("kit_insertion_page", "frame_width", default=1280))
+        frame_height = int(config.get("kit_insertion_page", "frame_height", default=720))
+
         if self.cap is None:
-            self.cap = cv2.VideoCapture(0, cv2.CAP_V4L2)
-            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+            self.cap = cv2.VideoCapture(camera_index, cv2.CAP_V4L2)
+            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, frame_width)
+            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, frame_height)
 
         if not self.cap.isOpened():
-            self.result_label.configure(text="Camera not available")
+            self.result_label.configure(
+                text=config.get(
+                    "kit_insertion_page",
+                    "camera_unavailable_text",
+                    default="Camera not available"
+                )
+            )
             return
 
         self.running = True
@@ -109,22 +173,40 @@ class KitInsertionPage(ctk.CTkFrame):
         if self.running and self.cap:
             ret, frame = self.cap.read()
             if ret:
+                preview_w = int(config.get("kit_insertion_page", "preview_width", default=960))
+                preview_h = int(config.get("kit_insertion_page", "preview_height", default=540))
+
                 frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                img = Image.fromarray(frame_rgb).resize((960, 540))
+                img = Image.fromarray(frame_rgb).resize((preview_w, preview_h))
                 imgtk = ImageTk.PhotoImage(image=img)
                 self.camera_label.configure(image=imgtk)
                 self._camera_imgtk = imgtk
 
-            self._after_id = self.after(30, self.update_frame)
+            self._after_id = self.after(
+                int(config.get("kit_insertion_page", "frame_refresh_ms", default=30)),
+                self.update_frame
+            )
 
     def capture_image(self, run_yolo=True):
         if not self.cap or not self.cap.isOpened():
-            self.result_label.configure(text="Camera not available")
+            self.result_label.configure(
+                text=config.get(
+                    "kit_insertion_page",
+                    "camera_unavailable_text",
+                    default="Camera not available"
+                )
+            )
             return
 
         ret, frame = self.cap.read()
         if not ret:
-            self.result_label.configure(text="Failed to capture image")
+            self.result_label.configure(
+                text=config.get(
+                    "kit_insertion_page",
+                    "capture_failed_text",
+                    default="Failed to capture image"
+                )
+            )
             return
 
         self.insert_btn.configure(state="disabled")
@@ -134,28 +216,51 @@ class KitInsertionPage(ctk.CTkFrame):
             self.after_cancel(self._after_id)
             self._after_id = None
 
+        preview_w = int(config.get("kit_insertion_page", "preview_width", default=960))
+        preview_h = int(config.get("kit_insertion_page", "preview_height", default=540))
+
         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        img = Image.fromarray(frame_rgb).resize((960, 540))
+        img = Image.fromarray(frame_rgb).resize((preview_w, preview_h))
         imgtk = ImageTk.PhotoImage(image=img)
         self.camera_label.configure(image=imgtk)
         self._camera_imgtk = imgtk
-        self.confirmation_label.configure(text="Photo captured successfully!")
+        self.confirmation_label.configure(
+            text=config.get(
+                "kit_insertion_page",
+                "photo_captured_text",
+                default="Photo captured successfully!"
+            )
+        )
         self._captured_frame = frame
 
         if run_yolo:
-            self.after(600, self.generate_result)
+            self.after(
+                int(config.get("kit_insertion_page", "analysis_delay_ms", default=600)),
+                self.generate_result
+            )
         else:
-            self.result_label.configure(text="Bill captured")
+            self.result_label.configure(
+                text=config.get(
+                    "kit_insertion_page",
+                    "bill_captured_text",
+                    default="Bill captured"
+                )
+            )
             self.insert_btn.configure(state="normal")
 
     def generate_result(self):
         raw_frame = self._captured_frame.copy()
         frame_resized = cv2.resize(raw_frame, (1280, 720))
         annotated_frame = frame_resized.copy()
-        result_text = "No object detected"
+        result_text = config.get(
+            "kit_insertion_page",
+            "no_object_text",
+            default="No object detected"
+        )
 
         try:
-            results = self.model.predict(source=frame_resized, conf=0.3, verbose=False)
+            conf = float(config.get("kit_insertion_page", "yolo_confidence", default=0.3))
+            results = self.model.predict(source=frame_resized, conf=conf, verbose=False)
             if results and len(results[0].boxes) > 0:
                 class_indices = results[0].boxes.cls.cpu().numpy().astype(int)
                 class_names = [results[0].names[i] for i in class_indices]
@@ -163,14 +268,19 @@ class KitInsertionPage(ctk.CTkFrame):
                 annotated_frame = results[0].plot()
         except Exception as e:
             print("Analysis failed:", e, flush=True)
-            result_text = "Invalid"
+            result_text = config.get("kit_insertion_page", "invalid_text", default="Invalid")
+
+        preview_w = int(config.get("kit_insertion_page", "preview_width", default=960))
+        preview_h = int(config.get("kit_insertion_page", "preview_height", default=540))
 
         display_rgb = cv2.cvtColor(annotated_frame, cv2.COLOR_BGR2RGB)
-        img = Image.fromarray(display_rgb).resize((960, 540))
+        img = Image.fromarray(display_rgb).resize((preview_w, preview_h))
         imgtk = ImageTk.PhotoImage(image=img)
         self.camera_label.configure(image=imgtk)
         self._camera_imgtk = imgtk
-        self.result_label.configure(text=f"Result: {result_text}")
+        self.result_label.configure(
+            text=f"{config.get('kit_insertion_page', 'result_prefix', default='Result')}: {result_text}"
+        )
 
         user_id = self.user_data.get("user_id") or self.user_data.get("userID") or self.user_data.get("_id") or "unknown"
         product_id = (
@@ -206,7 +316,10 @@ class KitInsertionPage(ctk.CTkFrame):
             daemon=True
         ).start()
 
-        self.after(5000, self.logout_user)
+        self.after(
+            int(config.get("kit_insertion_page", "logout_delay_ms", default=5000)),
+            self.logout_user
+        )
 
     def send_to_backend(self, session_dir, result_text):
         try:
@@ -225,8 +338,7 @@ class KitInsertionPage(ctk.CTkFrame):
 
             if not user_id or not product_id or not transaction_id:
                 print(
-                    f"[KIT] Skipping backend upload: "
-                    f"user_id={user_id}, product_id={product_id}, transaction_id={transaction_id}",
+                    f"[KIT] Skipping backend upload: user_id={user_id}, product_id={product_id}, transaction_id={transaction_id}",
                     flush=True,
                 )
                 return
@@ -244,7 +356,6 @@ class KitInsertionPage(ctk.CTkFrame):
             try:
                 result_res = api_client.post_result(payload)
                 print(f"[KIT] Result JSON upload status: {result_res.status_code}", flush=True)
-                print(f"[KIT] Result JSON upload body: {result_res.text}", flush=True)
             except Exception as e:
                 print(f"[KIT] Result JSON upload failed: {e}", flush=True)
 
@@ -275,17 +386,20 @@ class KitInsertionPage(ctk.CTkFrame):
             or self.user_data.get("latest_transaction_id")
         )
 
-        # persist into user_data too so downstream pages can still see it
         if self.transaction_id:
             self.user_data["transaction_id"] = self.transaction_id
             self.user_data["latest_transaction_id"] = self.transaction_id
 
         self.shell.set_header_right(f"Welcome, {self.user_data.get('username', 'User')}!")
-        self.result_label.configure(text="Insert your test kit")
+        self.result_label.configure(
+            text=config.get(
+                "kit_insertion_page",
+                "initial_text",
+                default="Insert your test kit"
+            )
+        )
         self.confirmation_label.configure(text=" ")
         self.insert_btn.configure(state="normal")
-
-        print(f"[KIT] update_data transaction_id={self.transaction_id}", flush=True)
 
         self.start_camera()
 
@@ -294,7 +408,13 @@ class KitInsertionPage(ctk.CTkFrame):
         self.user_data = {}
         self.selected_product = None
         self.transaction_id = None
-        self.result_label.configure(text="Insert your test kit")
+        self.result_label.configure(
+            text=config.get(
+                "kit_insertion_page",
+                "initial_text",
+                default="Insert your test kit"
+            )
+        )
         self.confirmation_label.configure(text=" ")
         self.insert_btn.configure(state="normal")
 
@@ -307,7 +427,7 @@ class KitInsertionPage(ctk.CTkFrame):
                     page.reset_fields()
 
         self.controller.show_loading_then(
-            "Logging Out...",
+            config.get("kit_insertion_page", "logout_loading_text", default="Logging Out..."),
             "WelcomePage",
             delay=1000
         )
