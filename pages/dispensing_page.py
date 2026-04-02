@@ -17,6 +17,7 @@ class DispensingPage(ctk.CTkFrame):
         self.total_paid = 0
         self.change = 0
         self.total = 0
+        self.transaction_id = None
 
         self.processing = False
 
@@ -89,6 +90,7 @@ class DispensingPage(ctk.CTkFrame):
         total_paid=0,
         change=0,
         total=0,
+        transaction_id=None,
         **kwargs
     ):
         self.user_data = user_data or {}
@@ -98,10 +100,28 @@ class DispensingPage(ctk.CTkFrame):
         self.change = change or 0
         self.total = total or 0
 
+        self.transaction_id = (
+            transaction_id
+            or kwargs.get("transaction_id")
+            or self.user_data.get("transaction_id")
+            or self.user_data.get("transactionID")
+            or self.user_data.get("latest_transaction_id")
+        )
+
+        if self.transaction_id:
+            self.user_data["transaction_id"] = self.transaction_id
+            self.user_data["latest_transaction_id"] = self.transaction_id
+
         self.processing = False
 
         username = self.user_data.get("username", "User")
         product_name = self.product.get("name") or self.product.get("type") or "Unknown Item"
+        product_id = (
+            self.product.get("productID")
+            or self.product.get("product_id")
+            or self.product.get("id")
+            or "N/A"
+        )
 
         self.shell.set_header_right(f"Welcome, {username}!")
         self.message_label.configure(text=self._base_text, text_color=theme.INFO)
@@ -109,10 +129,14 @@ class DispensingPage(ctk.CTkFrame):
             text=(
                 f"User: {username}\n"
                 f"Item: {product_name}\n"
+                f"Product ID: {product_id}\n"
+                f"Transaction ID: {self.transaction_id or 'N/A'}\n"
                 f"Please do not leave while dispensing is in progress."
             )
         )
         self.status_label.configure(text="", text_color=theme.MUTED)
+
+        print(f"[DISPENSE] update_data transaction_id={self.transaction_id}", flush=True)
 
         self.start_animation()
         self.after(200, self.start_dispensing)
@@ -162,6 +186,7 @@ class DispensingPage(ctk.CTkFrame):
                 text_color=theme.SUCCESS
             )
             print(f"[DISPENSE] success: {result}", flush=True)
+            print(f"[DISPENSE] forwarding to HowToUsePage transaction_id={self.transaction_id}", flush=True)
 
             self.after(
                 1500,
@@ -170,7 +195,8 @@ class DispensingPage(ctk.CTkFrame):
                     "HowToUsePage",
                     delay=800,
                     user_data=self.user_data,
-                    selected_product=self.product
+                    selected_product=self.product,
+                    transaction_id=self.transaction_id,
                 )
             )
         else:

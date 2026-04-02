@@ -30,44 +30,70 @@ class QRLoginPage(ctk.CTkFrame):
         content_wrap.grid_columnconfigure(0, weight=1)
         content_wrap.grid_rowconfigure(0, weight=1)
         content_wrap.grid_rowconfigure(1, weight=0)
-        content_wrap.grid_rowconfigure(2, weight=0)
-        content_wrap.grid_rowconfigure(3, weight=1)
+        content_wrap.grid_rowconfigure(2, weight=1) # Adjusted weight to keep card centered
 
-        self.card = RoundedCard(content_wrap, pad=18, auto_size=True)
+        # Main Square Page (Bigger)
+        self.card = RoundedCard(content_wrap, pad=50, auto_size=True)
         self.card.grid(row=1, column=0)
 
         body = card_body(self.card)
 
+        # 1. Main Title
         self.title_label = ctk.CTkLabel(
             body,
             text='SCAN QR TO LOGIN',
-            font=theme.font(28, 'bold'),
+            font=theme.font(32, 'bold'),
             text_color=theme.BLACK,
             fg_color=theme.WHITE
         )
-        self.title_label.pack(padx=20, pady=(14, 10))
+        self.title_label.pack(padx=20, pady=(25, 10))
 
+        # 2. Instruction Box (Gray Outline Only)
+        self.instruction_box = ctk.CTkFrame(
+            body,
+            fg_color="transparent",
+            border_color="#CCCCCC",
+            border_width=2,
+            corner_radius=12,
+            width=500,
+            height=110
+        )
+        self.instruction_box.pack(padx=40, pady=15)
+        self.instruction_box.pack_propagate(False)
+
+        self.instruction_text = ctk.CTkLabel(
+            self.instruction_box,
+            text="Sign in/up your account in our website to generate a QR",
+            font=theme.font(16, 'bold'),
+            text_color=theme.GRAY,
+            wraplength=420,
+            justify='center'
+        )
+        self.instruction_text.place(relx=0.5, rely=0.5, anchor='center')
+
+        # 3. Scanning Result Label (Inside the card)
         self.result_label = ctk.CTkLabel(
             body,
             text='Waiting for QR scan...',
-            font=theme.font(22, 'bold'),
+            font=theme.font(24, 'bold'),
             text_color=theme.MUTED,
-            wraplength=420,
+            wraplength=480,
             justify='center',
             fg_color=theme.WHITE
         )
-        self.result_label.pack(padx=20, pady=(6, 14))
+        self.result_label.pack(padx=20, pady=(10, 5))
 
+        # 4. FIXED: Status Label moved INSIDE the card body
         self.status_label = ctk.CTkLabel(
-            content_wrap,
+            body,
             text='',
-            font=theme.font(20, 'bold'),
+            font=theme.font(18, 'bold'),
             text_color=theme.INFO,
-            wraplength=700,
+            wraplength=480,
             justify='center',
             fg_color='transparent'
         )
-        self.status_label.grid(row=2, column=0, pady=(16, 0), padx=24)
+        self.status_label.pack(padx=20, pady=(0, 25))
 
         self.start_waiting_animation()
         self.start_key_listener()
@@ -118,7 +144,6 @@ class QRLoginPage(ctk.CTkFrame):
                     if not scanned or self.processing:
                         return
 
-                    # LOCK IMMEDIATELY before starting the thread
                     self.processing = True
                     self.after(0, self.show_loading)
 
@@ -180,7 +205,6 @@ class QRLoginPage(ctk.CTkFrame):
                 err = data.get('error') or 'Login failed'
 
                 def fail():
-                    # Ignore late failure updates if login already succeeded
                     if self.disabled:
                         return
                     self.status_label.configure(text='Login failed', text_color=theme.ERROR)

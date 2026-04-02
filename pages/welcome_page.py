@@ -1,7 +1,8 @@
+import os
+from PIL import Image
 from frontend import tk_compat as ctk
 from frontend import theme
 from frontend.widgets import AppShell, RoundedCard, card_body
-
 
 class WelcomePage(ctk.CTkFrame):
     def __init__(self, master, controller):
@@ -11,63 +12,84 @@ class WelcomePage(ctk.CTkFrame):
         shell = AppShell(self)
         shell.pack(fill='both', expand=True)
 
-        center_frame = ctk.CTkFrame(shell.body, fg_color='transparent')
-        center_frame.pack(expand=True)
-
-        accent = ctk.CTkLabel(
-            center_frame,
-            text='●    ●    ●',
-            font=theme.font(22, 'bold'),
-            text_color=theme.ORANGE
+        main_container = RoundedCard(
+            shell.body,
+            fg_color=theme.WHITE,
+            radius=40,
+            height=600,
+            width=700,
+            auto_size=False
         )
-        accent.pack(pady=(0, 6))
+        main_container.pack(expand=True, padx=80, pady=40) 
+        container_body = card_body(main_container)
+
+        try:
+            logo_path = os.path.join("assets/logo2.png")
+            from PIL import ImageTk
+
+            img = Image.open(logo_path)
+            img.thumbnail((350, 100))  # keep proportion and fit inside box
+            logo_image = ImageTk.PhotoImage(img)
+
+            logo_label = ctk.CTkLabel(container_body, image=logo_image, text="")
+            logo_label.image = logo_image  # keep reference to prevent GC
+            logo_label.pack(pady=(40, 10))
+        except Exception as e:
+            print("Logo load failed:", e)
+            logo_label = ctk.CTkLabel(container_body, text="CONFIDEX", font=theme.heavy(42))
+            logo_label.pack(pady=(40, 10))
 
         title = ctk.CTkLabel(
-            center_frame,
-            text='WELCOME!',
-            font=theme.heavy(58),
+            container_body,
+            text='WELCOME',
+            font=theme.heavy(64),
             text_color=theme.TEXT
         )
-        title.pack(pady=(10, 10))
+        title.pack(pady=(10, 5))
 
         subtitle = ctk.CTkLabel(
-            center_frame,
-            text='Anonymous blood-based health screening starts here.',
+            container_body,
+            text='Anonymous Health Screening',
             font=theme.font(22, 'bold'),
             text_color=theme.MUTED
         )
-        subtitle.pack(pady=(0, 26))
+        subtitle.pack(pady=(0, 40))
 
-        # preserve the original look by allowing this one to auto-size from content
         tap_card = RoundedCard(
-            center_frame,
+            container_body,
             fg_color=theme.ORANGE,
             border_width=0,
-            radius=46,
-            pad=16,
+            radius=25,
+            pad=10,
             auto_size=True
         )
-        tap_card.pack(pady=12)
+        tap_card.pack(pady=20)
         tap_body = card_body(tap_card)
 
         tap_text = ctk.CTkLabel(
             tap_body,
-            text='TAP TO PROCEED!',
-            font=theme.heavy(28),
-            text_color=theme.WHITE,
-            fg_color=theme.ORANGE
+            text='TAP TO PROCEED',
+            font=theme.font(24, 'bold'),
+            text_color=theme.WHITE
         )
-        tap_text.pack(padx=28, pady=14, expand=True)
+        tap_text.pack(padx=80, pady=20)
 
         hint = ctk.CTkLabel(
-            center_frame,
-            text='Tap anywhere on the screen to continue to QR login.',
-            font=theme.font(18, 'bold'),
+            container_body,
+            text='Tap anywhere to start your QR login',
+            font=theme.font(16, 'normal'),
             text_color=theme.MUTED
         )
-        hint.pack(pady=(20, 0))
+        hint.pack(pady=(20, 40))
 
-        for widget in (self, shell, shell.body, center_frame, title, subtitle, tap_card, tap_card.canvas, tap_body, tap_text, hint, accent):
+        all_widgets = [
+            self, shell, shell.body, main_container, container_body, 
+            logo_label, title, subtitle, tap_card, tap_body, tap_text, hint
+        ]
+        
+        for widget in all_widgets:
+            if hasattr(widget, 'canvas'):
+                widget.canvas.bind('<Button-1>', self.go_to_login)
             widget.bind('<Button-1>', self.go_to_login)
 
     def go_to_login(self, event=None):

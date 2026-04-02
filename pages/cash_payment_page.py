@@ -28,6 +28,12 @@ except Exception as e:
             pass
 
 
+from backend.util.dispenser_serial import (
+    send_bill_on_command,
+    send_bill_off_command,
+)
+
+
 class CashPaymentPage(ctk.CTkFrame):
     def __init__(self, master, controller):
         super().__init__(master, fg_color=theme.CREAM)
@@ -38,6 +44,7 @@ class CashPaymentPage(ctk.CTkFrame):
         self.total_cash_inserted = 0
         self.transaction_in_progress = False
         self.loading_visible = False
+        self.planned_cash_bill = None
 
         self.pulse_count = 0
         self.last_pulse_time = 0.0
@@ -49,6 +56,9 @@ class CashPaymentPage(ctk.CTkFrame):
         self._status_anim_running = False
         self._status_base_text = 'Insert bills to pay'
         self._status_dot_count = 0
+
+        self.bill_acceptor_enabled = False
+        self._bill_command_lock = threading.Lock()
 
         print(f'[CASH] Initializing CashPaymentPage | GPIOZERO_AVAILABLE={GPIOZERO_AVAILABLE}', flush=True)
 
@@ -189,6 +199,49 @@ class CashPaymentPage(ctk.CTkFrame):
         self._dot_count = 0
         self._animate_dots_running = False
 
+    # =========================
+    # BILL ACCEPTOR SERIAL CONTROL
+    # =========================
+    def _enable_bill_acceptor_thread(self):
+        with self._bill_command_lock:
+            try:
+                result = send_bill_on_command()
+                print(f'[CASH] BILL_ON result: {result}', flush=True)
+                if result.get('success'):
+                    self.bill_acceptor_enabled = True
+                else:
+                    print(f"[CASH] Failed to enable bill acceptor: {result.get('message')}", flush=True)
+            except Exception as e:
+                print(f'[CASH] BILL_ON exception: {e}', flush=True)
+
+    def _disable_bill_acceptor_thread(self):
+        with self._bill_command_lock:
+            try:
+                result = send_bill_off_command()
+                print(f'[CASH] BILL_OFF result: {result}', flush=True)
+                if result.get('success'):
+                    self.bill_acceptor_enabled = False
+                else:
+                    print(f"[CASH] Failed to disable bill acceptor: {result.get('message')}", flush=True)
+            except Exception as e:
+                print(f'[CASH] BILL_OFF exception: {e}', flush=True)
+
+    def enable_bill_acceptor(self, async_mode=True):
+        if self.bill_acceptor_enabled:
+            return
+
+        if async_mode:
+            threading.Thread(target=self._enable_bill_acceptor_thread, daemon=True).start()
+        else:
+            self._enable_bill_acceptor_thread()
+
+
+    def disable_bill_acceptor(self, async_mode=True):
+        if async_mode:
+            threading.Thread(target=self._disable_bill_acceptor_thread, daemon=True).start()
+        else:
+            self._disable_bill_acceptor_thread()
+
     def go_back(self):
         print('[CASH] go_back called', flush=True)
 
@@ -196,6 +249,7 @@ class CashPaymentPage(ctk.CTkFrame):
             print('[CASH] go_back blocked', flush=True)
             return
 
+        self.disable_bill_acceptor()
         self.stop_status_animation()
         self.hide_loading()
 
@@ -207,6 +261,67 @@ class CashPaymentPage(ctk.CTkFrame):
             selected_product=self.selected_product,
             discount=self.discount
         )
+
+    def update_data(self, user_data=None, selected_product=None, discount=0, planned_cash_bill=None, **kwargs):
+        self.user_data = (user_data or {}).copy()
+        self.selected_product = (selected_product or {}).copy() if selected_product else None
+        self.discount = discount or 0
+        self.planned_cash_bill = planned_cash_bill
+        self.total_cash_inserted = 0
+        self.transaction_in_progress = False
+
+        with self.pulse_lock:
+            self.pulse_count = 0
+            self.last_pulse_time = 0.0
+
+        if not self.user_data or not self.selected_product:
+            print('[CASH] missing user_data or selected_product', flush=True)
+            self.order_text.configure(
+                text='No product selected or user data missing',
+                text_color=theme.ERROR
+            )
+            self._set_status(
+                text='Please go back and choose a product first.',
+                color=theme.ERROR,
+                visible=True
+            )
+            self._set_progress(visible=False)
+            self._set_helper(visible=False)
+            self.disable_bill_acceptor()
+            return
+
+        total = self.selected_product.get('price', 0) * (1 - self.discount / 100)
+
+        planned_line = (
+            f"Planned bill: ₱{float(self.planned_cash_bill):.2f}\n"
+            if self.planned_cash_bill is not None else ""
+        )
+
+        self.order_text.configure(
+            text=(
+                f"User: {self.user_data.get('username', 'User')}\n"
+                f"Product: {self.selected_product.get('name', 'Unknown')}\n"
+                f"Type: {self.selected_product.get('type', 'Unknown')}\n"
+                f"Total: ₱{total:.2f}\n"
+                f"{planned_line}"
+            ).strip(),
+            text_color=theme.BLACK
+        )
+
+        self.start_status_animation('Insert bills to pay', theme.INFO)
+        self._set_progress(
+            text='Accepted denominations: 50, 100, 200, 500, 1000',
+            color=theme.MUTED,
+            visible=True
+        )
+        self._set_helper(
+            text='Insert the selected bill first, then wait for the amount to update.',
+            color=theme.MUTED,
+            visible=True
+        )
+        self.hide_loading()
+
+        self.enable_bill_acceptor()
 
     def _set_status(self, text='', color=None, visible=True):
         self.stop_status_animation()
@@ -385,72 +500,20 @@ class CashPaymentPage(ctk.CTkFrame):
             if not self.transaction_in_progress:
                 self.transaction_in_progress = True
                 print('[CASH] payment complete, proceeding to confirm_payment', flush=True)
+
                 self._set_status(
                     text=f'Total inserted: ₱{self.total_cash_inserted:.2f}. Payment complete!',
                     color=theme.SUCCESS,
                     visible=True
                 )
                 self._set_helper(
-                    text='Preparing your receipt and transaction record...',
+                    text='Saving your transaction...',
                     color=theme.MUTED,
                     visible=True
                 )
                 self.after(1200, self.confirm_payment)
 
             self.after(700, self.hide_loading)
-
-    def update_data(self, user_data=None, selected_product=None, discount=0, **kwargs):
-        print(f'[CASH] update_data | user_data={user_data} | selected_product={selected_product} | discount={discount}', flush=True)
-
-        self.user_data = (user_data or {}).copy()
-        self.selected_product = (selected_product or {}).copy() if selected_product else None
-        self.discount = discount or 0
-        self.total_cash_inserted = 0
-        self.transaction_in_progress = False
-
-        with self.pulse_lock:
-            self.pulse_count = 0
-            self.last_pulse_time = 0.0
-
-        if not self.user_data or not self.selected_product:
-            print('[CASH] missing user_data or selected_product', flush=True)
-            self.order_text.configure(
-                text='No product selected or user data missing',
-                text_color=theme.ERROR
-            )
-            self._set_status(
-                text='Please go back and choose a product first.',
-                color=theme.ERROR,
-                visible=True
-            )
-            self._set_progress(visible=False)
-            self._set_helper(visible=False)
-            return
-
-        total = self.selected_product.get('price', 0) * (1 - self.discount / 100)
-
-        self.order_text.configure(
-            text=(
-                f"User: {self.user_data.get('username', 'User')}\n"
-                f"Product: {self.selected_product.get('name', 'Unknown')}\n"
-                f"Type: {self.selected_product.get('type', 'Unknown')}\n"
-                f"Total: ₱{total:.2f}"
-            ),
-            text_color=theme.BLACK
-        )
-
-        self.start_status_animation('Insert bills to pay', theme.INFO)
-        self._set_progress(
-            text='Accepted denominations: 50, 100, 200, 500, 1000',
-            color=theme.MUTED,
-            visible=True
-        )
-        self._set_helper(
-            text='Insert bills one at a time and wait for the amount to update.',
-            color=theme.MUTED,
-            visible=True
-        )
-        self.hide_loading()
 
     def confirm_payment(self):
         print('[CASH] confirm_payment called', flush=True)
@@ -464,6 +527,7 @@ class CashPaymentPage(ctk.CTkFrame):
                 visible=True
             )
             self.hide_loading()
+            self.disable_bill_acceptor()
             return
 
         cash = self.total_cash_inserted
@@ -475,12 +539,15 @@ class CashPaymentPage(ctk.CTkFrame):
             'status': 'completed',
             'items': [{
                 'name': self.selected_product.get('name', 'Unknown'),
-                'productID': self.selected_product.get('productID') or self.selected_product.get('product_id') or ''
+                'productID': self.selected_product.get('productID') or self.selected_product.get('product_id') or '',
+                'type': self.selected_product.get('type', ''),
+                'price': float(self.selected_product.get('price', 0) or 0),
+                'discount': float(self.discount or 0),
+                'finalPrice': float(total),
+                'result': 'Pending',
             }],
             'purchasedDate': None,
         }
-
-        print(f'[CASH] transaction_data={transaction_data}', flush=True)
 
         threading.Thread(
             target=self.post_transaction_and_continue,
@@ -532,11 +599,6 @@ class CashPaymentPage(ctk.CTkFrame):
             response = api_client.post_transaction(transaction_data_local)
             print(f'[CASH] post_transaction status_code={response.status_code} ok={response.ok}', flush=True)
 
-            try:
-                print(f'[CASH] post_transaction response_text={response.text}', flush=True)
-            except Exception as e:
-                print(f'[CASH] failed reading response.text: {e}', flush=True)
-
             if not response.ok:
                 self.controller.after(0, lambda: self._handle_transaction_failure(
                     f'Transaction failed ({response.status_code}).'
@@ -546,8 +608,13 @@ class CashPaymentPage(ctk.CTkFrame):
             transaction_id = None
             try:
                 data = response.json()
-                print(f'[CASH] post_transaction response_json={data}', flush=True)
-                transaction_id = data.get('_id') or data.get('transaction_id') or data.get('id')
+                transaction_obj = data.get('transaction') or {}
+                transaction_id = (
+                    transaction_obj.get('_id')
+                    or data.get('_id')
+                    or data.get('transaction_id')
+                    or data.get('id')
+                )
             except Exception as e:
                 print(f'[CASH] failed to parse response json: {e}', flush=True)
 
@@ -565,28 +632,63 @@ class CashPaymentPage(ctk.CTkFrame):
             ))
 
     def _handle_transaction_success(self, cash, change, total, transaction_id=None):
-        print(f'[CASH] transaction success | transaction_id={transaction_id}', flush=True)
+        print(f'[CASH] transaction success | transaction_id={transaction_id} | change={change}', flush=True)
 
-        self._set_status(
-            text='Transaction saved successfully. Generating receipt...',
-            color=theme.SUCCESS,
-            visible=True
-        )
+        self.disable_bill_acceptor(async_mode=False)
+        self.hide_loading()
 
-        self.controller.show_loading_then(
-            'Generating receipt',
-            'ReceiptPage',
-            delay=1000,
-            user_data=self.user_data,
-            product=self.selected_product,
-            discount=self.discount,
-            total_paid=cash,
-            change=change,
-            total=total,
-            payment_method='cash',
-            online_payment=False,
-            transaction_id=transaction_id
-        )
+        if change > 0:
+            self._set_status(
+                text='Transaction saved successfully. Preparing your change...',
+                color=theme.SUCCESS,
+                visible=True
+            )
+            self._set_helper(
+                text='Please wait while the machine dispenses your coins.',
+                color=theme.MUTED,
+                visible=True
+            )
+
+            self.controller.show_loading_then(
+                'Preparing change',
+                'ChangeDispensingPage',
+                delay=800,
+                user_data=self.user_data,
+                product=self.selected_product,
+                discount=self.discount,
+                total_paid=cash,
+                change=change,
+                total=total,
+                payment_method='cash',
+                online_payment=False,
+                transaction_id=transaction_id
+            )
+        else:
+            self._set_status(
+                text='Transaction saved successfully. Generating receipt...',
+                color=theme.SUCCESS,
+                visible=True
+            )
+            self._set_helper(
+                text='No change to dispense. Proceeding to receipt.',
+                color=theme.MUTED,
+                visible=True
+            )
+
+            self.controller.show_loading_then(
+                'Generating receipt',
+                'ReceiptPage',
+                delay=800,
+                user_data=self.user_data,
+                product=self.selected_product,
+                discount=self.discount,
+                total_paid=cash,
+                change=change,
+                total=total,
+                payment_method='cash',
+                online_payment=False,
+                transaction_id=transaction_id
+            )
 
         self.after(7000, self.reset_fields)
 
@@ -594,6 +696,8 @@ class CashPaymentPage(ctk.CTkFrame):
         print(f'[CASH] transaction failure | error={error_message}', flush=True)
         self.transaction_in_progress = False
         self.hide_loading()
+
+        self.disable_bill_acceptor()
 
         self._set_status(
             text=error_message,
@@ -616,6 +720,7 @@ class CashPaymentPage(ctk.CTkFrame):
         self.discount = 0
         self.total_cash_inserted = 0
         self.transaction_in_progress = False
+        self.planned_cash_bill = None
 
         with self.pulse_lock:
             self.pulse_count = 0
@@ -637,3 +742,7 @@ class CashPaymentPage(ctk.CTkFrame):
             visible=True
         )
         self.hide_loading()
+
+    def destroy(self):
+        self.stop_status_animation()
+        super().destroy()

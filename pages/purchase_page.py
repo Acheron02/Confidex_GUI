@@ -76,12 +76,18 @@ class PurchasePage(ctk.CTkFrame):
         self.user_data = user_data or {}
         self.username = self.user_data.get('username', 'User')
         self.userID = self.user_data.get('userID')
+
         self.selected_tile = None
         self.selected_product = None
         self.discount = None
+
         self.qr_buffer = ''
         self.scan_disabled = False
         self.listener = None
+
+        self.validation_in_progress = False
+        self.last_scanned_token = None
+        self.discount_applied_token = None
 
         self.shell = AppShell(self, title_right='Welcome, User!')
         self.shell.pack(fill='both', expand=True)
@@ -139,8 +145,8 @@ class PurchasePage(ctk.CTkFrame):
         tiles.grid_columnconfigure(1, weight=1, uniform='product-col')
 
         self.products = [
-            {'name': 'Confidex Kit', 'product_id': 'HIV123', 'type': 'HIV Test', 'price': 1},
-            {'name': 'Confidex Kit', 'product_id': 'DENGUE123', 'type': 'Dengue Test', 'price': 1},
+            {'name': 'Confidex Kit', 'product_id': 'HIV123', 'type': 'HIV Test', 'price': 50},
+            {'name': 'Confidex Kit', 'product_id': 'DENGUE123', 'type': 'Dengue Test', 'price': 80},
         ]
 
         self.tiles = []
@@ -151,7 +157,7 @@ class PurchasePage(ctk.CTkFrame):
 
         right_body.grid_rowconfigure(0, weight=0)
         right_body.grid_rowconfigure(1, weight=1)
-        right_body.grid_rowconfigure(2, weight=1)
+        right_body.grid_rowconfigure(2, weight=0)
         right_body.grid_rowconfigure(3, weight=0)
         right_body.grid_columnconfigure(0, weight=1)
 
@@ -164,17 +170,27 @@ class PurchasePage(ctk.CTkFrame):
         )
         right_title.grid(row=0, column=0, pady=(16, 10))
 
-        self.order_text = ctk.CTkLabel(
+        self.order_box = ctk.CTkFrame(
             right_body,
-            text='No item selected',
-            font=theme.font(22, 'bold'),
-            text_color=theme.MUTED,
-            justify='center',
-            anchor='center',
-            fg_color=theme.WHITE,
-            wraplength=380
+            fg_color="transparent",
+            border_color="#CCCCCC",
+            border_width=2,
+            corner_radius=12,
+            width=440,
+            height=320
         )
-        self.order_text.grid(row=1, column=0, sticky='nsew', padx=20, pady=(8, 6))
+        self.order_box.grid(row=1, column=0, pady=10)
+        self.order_box.grid_propagate(False)
+
+        self.order_text = ctk.CTkLabel(
+            self.order_box,
+            text='No item selected',
+            font=theme.font(18, 'bold'),
+            text_color="#999999",
+            justify='center',
+            wraplength=400
+        )
+        self.order_text.place(relx=0.5, rely=0.5, anchor='center')
 
         self.status_label = ctk.CTkLabel(
             right_body,
@@ -186,7 +202,7 @@ class PurchasePage(ctk.CTkFrame):
             anchor='center',
             fg_color=theme.WHITE
         )
-        self.status_label.grid(row=2, column=0, sticky='nsew', padx=20, pady=(6, 10))
+        self.status_label.grid(row=2, column=0, sticky='nsew', padx=20, pady=(5, 10))
 
         btns = ctk.CTkFrame(right_body, fg_color=theme.WHITE)
         btns.grid(row=3, column=0, sticky='ew', pady=(8, 18))
@@ -198,24 +214,49 @@ class PurchasePage(ctk.CTkFrame):
         self.scan_btn = PillButton(
             btns,
             text='Discount',
-            width=210,
-            height=64,
+            width=180,
+            height=58,
             command=self.start_scan,
             state='disabled',
-            font=theme.font(21, 'bold')
+            font=theme.font(19, 'bold')
         )
-        self.scan_btn.grid(row=0, column=1, padx=30)
+        self.scan_btn.grid(row=0, column=1, padx=20)
 
         self.pay_btn = PillButton(
             btns,
             text='Pay',
-            width=210,
-            height=64,
+            width=180,
+            height=58,
             command=self.go_to_payment,
             state='disabled',
-            font=theme.font(21, 'bold')
+            font=theme.font(19, 'bold')
         )
-        self.pay_btn.grid(row=0, column=2, padx=30)
+        self.pay_btn.grid(row=0, column=2, padx=20)
+
+    def update_order_summary(self):
+        if not self.selected_product:
+            self.order_text.configure(text='No item selected', text_color=theme.MUTED)
+            self.pay_btn.configure(state='disabled')
+            self.scan_btn.configure(state='disabled')
+            return
+
+        price = float(self.selected_product['price'])
+        discount_value = float(self.discount or 0)
+        discount_text = '-' if discount_value <= 0 else f'{discount_value:.0f}%'
+        total = price * (1 - discount_value / 100.0)
+
+        self.order_text.configure(
+            text=(
+                f"Item: {self.selected_product['name']}\n\n"
+                f"Type: {self.selected_product['type']}\n\n"
+                f"Amount: ₱{price:.2f}\n\n"
+                f"Discount: {discount_text}\n\n"
+                f"Total Price: ₱{total:.2f}"
+            ),
+            text_color="#999999",
+        )
+        self.pay_btn.configure(state='normal')
+        self.scan_btn.configure(state='normal' if not self.scan_disabled else 'disabled')
 
     def update_data(self, user_data=None, **kwargs):
         if user_data:
@@ -230,7 +271,6 @@ class PurchasePage(ctk.CTkFrame):
             self.listener = None
 
         self.reset_fields()
-
         self.user_data = {}
         self.username = 'User'
         self.userID = None
@@ -241,17 +281,8 @@ class PurchasePage(ctk.CTkFrame):
 
         if hasattr(self.controller, 'frames'):
             qr_page = self.controller.frames.get('QRLoginPage')
-            payment_page = self.controller.frames.get('PaymentMethodPage')
-            cash_page = self.controller.frames.get('CashPaymentPage')
-
             if qr_page and hasattr(qr_page, 'reset_fields'):
                 qr_page.reset_fields()
-
-            if payment_page and hasattr(payment_page, 'update_data'):
-                payment_page.update_data(user_data={}, selected_product=None, discount=0)
-
-            if cash_page and hasattr(cash_page, 'reset_fields'):
-                cash_page.reset_fields()
 
         self.controller.show_frame('WelcomePage')
 
@@ -263,91 +294,150 @@ class PurchasePage(ctk.CTkFrame):
         self.selected_tile = tile
         self.selected_product = tile.product.copy()
         self.selected_product['selection_id'] = str(uuid.uuid4())
+
         self.discount = None
         self.scan_disabled = False
-        self.status_label.configure(text='')
+        self.validation_in_progress = False
+        self.qr_buffer = ''
+        self.last_scanned_token = None
+        self.discount_applied_token = None
+
+        if self.listener:
+            self.listener.stop()
+            self.listener = None
+
+        self.status_label.configure(text='', text_color=theme.ERROR)
         self.update_order_summary()
 
-    def update_order_summary(self):
-        if not self.selected_product:
-            self.order_text.configure(text='No item selected', text_color=theme.MUTED)
-            self.pay_btn.configure(state='disabled')
-            self.scan_btn.configure(state='disabled')
-            return
-
-        price = self.selected_product['price']
-        discount_text = '-' if not self.discount else f'{self.discount}%'
-        total = price * (1 - (self.discount or 0) / 100)
-
-        self.order_text.configure(
-            text=(
-                f"Item: {self.selected_product['name']}\n"
-                f"Type: {self.selected_product['type']}\n"
-                f"Amount: ₱{price}\n"
-                f"Discount: {discount_text}\n"
-                f"Total Price: ₱{total:.2f}"
-            ),
-            text_color=theme.BLACK,
-        )
-        self.pay_btn.configure(state='normal')
-        self.scan_btn.configure(state='normal' if not self.scan_disabled else 'disabled')
-
     def start_scan(self):
-        if self.scan_disabled or not self.selected_product:
+        if self.scan_disabled or not self.selected_product or self.validation_in_progress:
             return
 
         self.qr_buffer = ''
+        self.last_scanned_token = None
+
         if self.listener:
             self.listener.stop()
+            self.listener = None
 
         self.listener = keyboard.Listener(on_press=self.on_key_press)
         self.listener.start()
+
         self.status_label.configure(
             text='Ready to scan discount QR.',
             text_color=theme.INFO
         )
+        print('[PURCHASE] Discount QR scan started', flush=True)
 
     def on_key_press(self, key):
+        if self.validation_in_progress or self.scan_disabled:
+            return
+
         try:
-            if key.char:
+            if hasattr(key, "char") and key.char:
                 self.qr_buffer += key.char
         except AttributeError:
-            if key == keyboard.Key.enter:
-                scanned = self.qr_buffer.strip()
-                self.qr_buffer = ''
-                threading.Thread(
-                    target=self._validate_and_apply_discount,
-                    args=(scanned,),
-                    daemon=True
-                ).start()
+            pass
+
+        if key == keyboard.Key.enter:
+            scanned = self.qr_buffer.strip()
+            self.qr_buffer = ''
+
+            print(f'[PURCHASE] Raw scanned QR token: {repr(scanned)}', flush=True)
+
+            if not scanned:
+                self.after(
+                    0,
+                    lambda: self.status_label.configure(
+                        text='Empty QR scan detected.',
+                        text_color=theme.ERROR
+                    )
+                )
+                return
+
+            if self.discount_applied_token == scanned:
+                print(f'[PURCHASE] Ignoring already applied token: {repr(scanned)}', flush=True)
+                self.after(
+                    0,
+                    lambda: self.status_label.configure(
+                        text='QR token valid. Discount applied.',
+                        text_color=theme.SUCCESS
+                    )
+                )
+                self.after(0, self.update_order_summary)
+                return
+
+            if self.last_scanned_token == scanned:
+                print(f'[PURCHASE] Ignoring duplicate token: {repr(scanned)}', flush=True)
+                return
+
+            self.last_scanned_token = scanned
+            self.validation_in_progress = True
+
+            if self.listener:
+                self.listener.stop()
+                self.listener = None
+
+            threading.Thread(
+                target=self._validate_and_apply_discount,
+                args=(scanned,),
+                daemon=True
+            ).start()
+
+    def _apply_discount_success(self, scanned):
+        self.discount = 10
+        self.scan_disabled = True
+        self.discount_applied_token = scanned
+
+        self.status_label.configure(
+            text='QR token valid. Discount applied.',
+            text_color=theme.SUCCESS
+        )
+        self.update_order_summary()
 
     def _validate_and_apply_discount(self, scanned):
         try:
+            print(f'[PURCHASE] Validating token for userID={repr(self.userID)} token={repr(scanned)}', flush=True)
+
             response = api_client.validate_discount_token(self.userID, scanned)
-            data = response.json() if response.headers.get('content-type', '').startswith('application/json') else {}
+
+            content_type = response.headers.get('content-type', '')
+            data = response.json() if content_type.startswith('application/json') else {}
+
+            print(f'[PURCHASE] Validate response status={response.status_code}', flush=True)
+            print(f'[PURCHASE] Validate response data={data}', flush=True)
+
             valid = response.ok and data.get('valid', False)
 
             if valid:
-                self.discount = 10
-                self.scan_disabled = True
-                self.after(0, lambda: self.status_label.configure(
-                    text='QR token valid. Discount applied.',
-                    text_color=theme.SUCCESS
-                ))
-                self.after(0, self.update_order_summary)
+                self.after(0, lambda s=scanned: self._apply_discount_success(s))
+                return
 
-                if self.listener:
-                    self.listener.stop()
-                    self.listener = None
-            else:
-                msg = data.get('error') or 'Invalid or expired QR token.'
-                self.after(0, lambda msg=msg: self.status_label.configure(text=msg, text_color=theme.ERROR))
+            msg = data.get('error') or 'Invalid or expired QR token.'
+
+            if msg == 'Token already used.' and self.discount_applied_token == scanned:
+                print(f'[PURCHASE] Ignoring already-used response after successful apply: {repr(scanned)}', flush=True)
+                self.after(0, lambda s=scanned: self._apply_discount_success(s))
+                return
+
+            self.after(
+                0,
+                lambda m=msg: self.status_label.configure(
+                    text=m,
+                    text_color=theme.ERROR
+                )
+            )
 
         except requests.RequestException as e:
-            self.after(0, lambda err=str(e): self.status_label.configure(
-                text=f'QR validation failed: {err}',
-                text_color=theme.ERROR
-            ))
+            self.after(
+                0,
+                lambda err=str(e): self.status_label.configure(
+                    text=f'QR validation failed: {err}',
+                    text_color=theme.ERROR
+                )
+            )
+        finally:
+            self.validation_in_progress = False
 
     def go_to_payment(self):
         if self.selected_product and self.user_data:
@@ -370,6 +460,9 @@ class PurchasePage(ctk.CTkFrame):
         self.discount = None
         self.qr_buffer = ''
         self.scan_disabled = False
+        self.validation_in_progress = False
+        self.last_scanned_token = None
+        self.discount_applied_token = None
 
         for tile in self.tiles:
             tile.set_selected(False)

@@ -1,6 +1,7 @@
 from frontend import tk_compat as ctk
 from frontend import theme
 from frontend.components import RoundedCard, OutlineTile, PillButton
+from PIL import Image, ImageTk
 
 
 def card_body(card):
@@ -18,14 +19,17 @@ class AppShell(ctk.CTkFrame):
         self.header_inner = ctk.CTkFrame(self.header, fg_color='transparent')
         self.header_inner.pack(fill='both', expand=True, padx=26)
 
+        img = Image.open("assets/logo1.png")
+        img.thumbnail((400, 400))
+
+        self.logo_img = ImageTk.PhotoImage(img)
+
         self.logo = ctk.CTkLabel(
             self.header_inner,
-            text='CONFIDEX',
-            font=theme.heavy(34),
-            text_color=theme.WHITE
+            image=self.logo_img,
+            text=""
         )
-        self.logo.pack(side='left')
-
+        self.logo.pack(side='left') 
         self.header_right = ctk.CTkLabel(
             self.header_inner,
             text=title_right or '',

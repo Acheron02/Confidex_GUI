@@ -1,10 +1,12 @@
 import os
+import mimetypes
 from pathlib import Path
+
 import requests
 from dotenv import load_dotenv
 
 ROOT = Path(__file__).resolve().parents[2]
-ENV_PATH = ROOT / '.env.local'
+ENV_PATH = ROOT / ".env.local"
 
 
 def reload_env():
@@ -16,10 +18,30 @@ reload_env()
 
 def _base_url() -> str:
     reload_env()
-    base = os.getenv('BASE_URL') or os.getenv('networkIP') or '127.0.0.1:3000'
-    if not base.startswith('http://') and not base.startswith('https://'):
-        base = f'http://{base}'
-    return base.rstrip('/')
+    base = (
+        os.getenv("WEBSITE_BASE_URL")
+        or os.getenv("BASE_URL")
+        or os.getenv("networkIP")
+        or "127.0.0.1:3000"
+    )
+
+    if not base.startswith("http://") and not base.startswith("https://"):
+        base = f"http://{base}"
+
+    return base.rstrip("/")
+
+
+def _device_api_key() -> str:
+    reload_env()
+    return os.getenv("DEVICE_API_KEY", "").strip()
+
+
+def _headers() -> dict:
+    headers = {}
+    api_key = _device_api_key()
+    if api_key:
+        headers["x-device-api-key"] = api_key
+    return headers
 
 
 def url(path: str) -> str:
@@ -28,50 +50,195 @@ def url(path: str) -> str:
 
 def post_json(path: str, payload: dict, timeout: int = 10):
     reload_env()
-    return requests.post(url(path), json=payload, timeout=timeout)
+    return requests.post(
+        url(path),
+        json=payload,
+        headers=_headers(),
+        timeout=timeout,
+    )
 
 
 def get_json(path: str, timeout: int = 10):
     reload_env()
-    return requests.get(url(path), timeout=timeout)
+    return requests.get(
+        url(path),
+        headers=_headers(),
+        timeout=timeout,
+    )
+
+
+def post_multipart(path: str, data: dict, files: dict, timeout: int = 30):
+    reload_env()
+    return requests.post(
+        url(path),
+        data=data,
+        files=files,
+        headers=_headers(),
+        timeout=timeout,
+    )
 
 
 def verify_login_qr(qr_code: str):
-    return post_json('/api/qr-tokens/verify', {'qrCode': qr_code})
+    payload = {
+        "qrCode": str(qr_code).strip() if qr_code else ""
+    }
+    print("[API] verify_login_qr payload:", repr(payload), flush=True)
+    res = post_json("/api/qr-tokens/verify", payload)
+    print("[API] verify_login_qr status:", res.status_code, flush=True)
+    print("[API] verify_login_qr body:", res.text, flush=True)
+    return res
 
 
 def validate_discount_token(user_id: str, token: str):
-    return post_json('/api/qr-tokens/validate', {'userId': user_id, 'token': token})
+    payload = {
+        "userId": str(user_id).strip() if user_id else "",
+        "token": str(token).strip() if token else "",
+    }
+    print("[API] validate_discount_token payload:", repr(payload), flush=True)
+    res = post_json("/api/qr-tokens/validate", payload)
+    print("[API] validate_discount_token status:", res.status_code, flush=True)
+    print("[API] validate_discount_token body:", res.text, flush=True)
+    return res
 
 
 def store_qr_token(user_id: str, token: str):
-    return post_json('/api/qr-tokens', {'userId': user_id, 'token': token})
+    payload = {
+        "userId": str(user_id).strip() if user_id else "",
+        "token": str(token).strip() if token else "",
+    }
+    print("[API] store_qr_token payload:", repr(payload), flush=True)
+    res = post_json("/api/qr-tokens", payload)
+    print("[API] store_qr_token status:", res.status_code, flush=True)
+    print("[API] store_qr_token body:", res.text, flush=True)
+    return res
 
 
 def post_transaction(payload: dict):
-    return post_json('/api/transaction', payload)
+    return post_json("/api/transaction", payload)
 
 
 def post_result(payload: dict):
-    return post_json('/api/results', payload)
-
-
-def upload_result_image(user_id: str, product_id: str, image_path: str):
-    reload_env()
-    with open(image_path, 'rb') as f:
-        files = {'image': (os.path.basename(image_path), f, 'image/jpeg')}
-        return requests.post(
-            url(f'/api/results/image/{user_id}/{product_id}'),
-            files=files,
-            timeout=10
-        )
+    return post_json("/api/results", payload)
 
 
 def create_paymongo_checkout(payload: dict):
-    reload_env()
-    return post_json('/api/paymongo/checkout', payload, timeout=15)
+    return post_json("/api/paymongo/checkout", payload, timeout=15)
 
 
 def get_paymongo_checkout_status(session_id: str):
-    reload_env()
-    return get_json(f'/api/paymongo/checkout-status/{session_id}', timeout=15)
+    return get_json(f"/api/paymongo/checkout-status/{session_id}", timeout=15)
+
+
+def upload_receipt(user_id: str, timestamp: str, receipt_data: dict):
+    payload = {
+        "user_id": str(user_id),
+        "timestamp": str(timestamp),
+        "receipt": receipt_data,
+    }
+    return post_json("/api/receipts/upload", payload, timeout=20)
+
+
+def upload_image(
+    user_id: str,
+    timestamp: str,
+    image_type: str,
+    image_path: str,
+    product_id: str | None = None,
+    transaction_id: str | None = None,
+):
+    image_file = Path(image_path)
+
+    if not image_file.exists():
+        raise FileNotFoundError(f"Image file not found: {image_path}")
+
+    mime_type = mimetypes.guess_type(image_file.name)[0] or "application/octet-stream"
+
+    with image_file.open("rb") as f:
+        files = {
+            "file": (image_file.name, f, mime_type)
+        }
+
+        data = {
+            "user_id": str(user_id),
+            "timestamp": str(timestamp),
+            "image_type": str(image_type),
+        }
+
+        if product_id:
+            data["productID"] = str(product_id)
+
+        if transaction_id:
+            data["transaction_id"] = str(transaction_id)
+
+        return post_multipart(
+            "/api/device/image/upload",
+            data=data,
+            files=files,
+            timeout=60,
+        )
+
+
+def upload_session_images(
+    user_id: str,
+    timestamp: str,
+    session_dir,
+    product_id: str | None = None,
+    transaction_id: str | None = None,
+):
+    session_dir = Path(session_dir)
+    results = {}
+
+    if not session_dir.exists() or not session_dir.is_dir():
+        return {
+            "ok": False,
+            "error": f"Session directory not found: {session_dir}",
+        }
+
+    allowed_suffixes = {".png", ".jpg", ".jpeg", ".webp"}
+    found_files = sorted(
+        p for p in session_dir.iterdir()
+        if p.is_file() and p.suffix.lower() in allowed_suffixes
+    )
+
+    if not found_files:
+        return {
+            "ok": False,
+            "error": f"No uploadable image files found in {session_dir}",
+        }
+
+    for image_path in found_files:
+        stem = image_path.stem.lower()
+
+        if "annotated" in stem:
+            image_type = "annotated"
+        elif "result" in stem:
+            image_type = "result"
+        elif "raw" in stem:
+            image_type = "raw"
+        else:
+            image_type = stem
+
+        try:
+            res = upload_image(
+                user_id=user_id,
+                timestamp=timestamp,
+                image_type=image_type,
+                image_path=str(image_path),
+                product_id=product_id,
+                transaction_id=transaction_id,
+            )
+
+            results[image_path.name] = {
+                "image_type": image_type,
+                "ok": res.ok,
+                "status_code": res.status_code,
+                "text": res.text,
+            }
+        except Exception as e:
+            results[image_path.name] = {
+                "image_type": image_type,
+                "ok": False,
+                "error": str(e),
+            }
+
+    return results
