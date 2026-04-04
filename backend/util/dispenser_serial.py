@@ -1,6 +1,6 @@
-import time
 import glob
 import threading
+import time
 
 try:
     import serial
@@ -9,7 +9,7 @@ except Exception:
 
 
 BAUD_RATE = 9600
-SERIAL_TIMEOUT = 15
+SERIAL_TIMEOUT = 20
 
 _SERIAL_LOCK = threading.Lock()
 _SERIAL_CONN = None
@@ -17,16 +17,32 @@ _SERIAL_PORT = None
 
 
 def map_product_to_command(product_id="", product_name=""):
-    pid = str(product_id).strip().lower()
+    from config_manager import config
+
+    pid = str(product_id).strip()
     pname = str(product_name).strip().lower()
 
-    if pid in ("1", "kit1", "oral", "oralkit", "hiv123", "hiv"):
+    # 1) Preferred: use synced booth config
+    product = config.get_product_by_id(pid) if pid else None
+    if product:
+        slot = str(product.get("dispense_slot", "")).strip().upper()
+
+        if slot == "KIT1":
+            return "DISPENSE:KIT1\n", "KIT1"
+        if slot == "KIT2":
+            return "DISPENSE:KIT2\n", "KIT2"
+        if slot == "KIT3":
+            return "DISPENSE:KIT3\n", "KIT3"
+
+    # 2) Backward-compatible fallback for older products
+    pid_lower = pid.lower()
+    if pid_lower in ("1", "kit1", "oral", "oralkit", "hiv123", "hiv"):
         return "DISPENSE:KIT1\n", "KIT1"
 
-    if pid in ("2", "kit2", "blood", "bloodkit", "dengue123", "dengue"):
+    if pid_lower in ("2", "kit2", "blood", "bloodkit", "dengue123", "dengue"):
         return "DISPENSE:KIT2\n", "KIT2"
 
-    if pid in ("3", "kit3", "urine", "urinekit"):
+    if pid_lower in ("3", "kit3", "urine", "urinekit"):
         return "DISPENSE:KIT3\n", "KIT3"
 
     if "oral" in pname or "hiv" in pname:
@@ -95,7 +111,6 @@ def _ensure_serial_locked(force_reopen=False):
     ser.write_timeout = 1
     ser.rtscts = False
     ser.dsrdtr = False
-
     ser.open()
 
     try:
@@ -146,19 +161,9 @@ def _read_replies(ser, command, timeout):
             break
 
         if upper.startswith("CHANGE_DISPENSED:"):
-            continue
-
-        if upper.startswith("ERROR:"):
-            if "DISPENSE_CHANGE:" not in command:
-                break
-            continue
-
-        if upper.startswith("COIN_STATUS:") and (
-            "GET_COIN_STATUS" in command or "DISPENSE_CHANGE:" in command
-        ):
             break
 
-        if upper.startswith("COIN_STOCK:") and "GET_COIN_STOCK" in command:
+        if upper.startswith("ERROR:"):
             break
 
     return replies
@@ -193,36 +198,6 @@ def _send_command_and_collect(command, timeout=SERIAL_TIMEOUT):
 
         print(f"[SERIAL] final failure sending {command.strip()}: {last_error}", flush=True)
         return []
-
-
-def _parse_coin_stock_line(stock_line):
-    stock = {}
-    raw = stock_line.split(":", 1)[1]
-    parts = raw.split(",")
-
-    for part in parts:
-        denom, count = part.split("=")
-        stock[int(denom.strip())] = int(count.strip())
-
-    return stock
-
-
-def _parse_coin_status_line(status_line):
-    raw = status_line.split(":", 1)[1]
-    parts = raw.split(",")
-
-    data = {}
-    for part in parts:
-        key, value = part.split("=", 1)
-        key = key.strip()
-        value = value.strip()
-
-        if key == "restock":
-            data[key] = [] if value == "NONE" else [int(v) for v in value.split("+")]
-        else:
-            data[key] = int(value)
-
-    return data
 
 
 def ping_arduino():
@@ -311,98 +286,132 @@ def send_bill_off_command():
     }
 
 
-def get_coin_stock():
-    replies = _send_command_and_collect("GET_COIN_STOCK\n", timeout=3)
+def _normalize_breakdown(breakdown: dict):
+    normalized = {}
 
-    stock_line = None
-    for line in replies:
-        if line.upper().startswith("COIN_STOCK:"):
-            stock_line = line
-            break
+    if not isinstance(breakdown, dict):
+        return normalized
 
-    if not stock_line:
-        return {
-            "success": False,
-            "message": "No coin stock response received.",
-            "stock": {},
-            "replies": replies,
-        }
+    for key, value in breakdown.items():
+        try:
+            denom = int(key)
+            qty = int(value)
+        except Exception:
+            continue
 
-    try:
-        stock = _parse_coin_stock_line(stock_line)
-        return {
-            "success": True,
-            "message": "Coin stock received.",
-            "stock": stock,
-            "replies": replies,
-        }
-    except Exception as e:
-        return {
-            "success": False,
-            "message": f"Failed to parse coin stock: {e}",
-            "stock": {},
-            "replies": replies,
-        }
+        if denom not in (20, 5, 1):
+            continue
+
+        if qty > 0:
+            normalized[denom] = qty
+
+    return normalized
 
 
-def get_coin_status():
-    replies = _send_command_and_collect("GET_COIN_STATUS\n", timeout=3)
+def _build_change_command_payload(breakdown: dict):
+    normalized = _normalize_breakdown(breakdown)
+    ordered_denoms = [20, 5, 1]
+    parts = []
 
-    status_line = None
-    for line in replies:
-        if line.upper().startswith("COIN_STATUS:"):
-            status_line = line
-            break
+    for denom in ordered_denoms:
+        qty = normalized.get(denom, 0)
+        if qty > 0:
+            parts.append(f"{denom}x{qty}")
 
-    if not status_line:
-        return {
-            "success": False,
-            "message": "No coin status response received.",
-            "status": {},
-            "replies": replies,
-        }
+    return ",".join(parts), normalized
+
+
+def _parse_change_dispensed_line(change_line: str):
+    result = {}
 
     try:
-        status = _parse_coin_status_line(status_line)
-        return {
-            "success": True,
-            "message": "Coin status received.",
-            "status": status,
-            "replies": replies,
-        }
-    except Exception as e:
-        return {
-            "success": False,
-            "message": f"Failed to parse coin status: {e}",
-            "status": {},
-            "replies": replies,
-        }
-
-
-def send_change_command(amount):
-    try:
-        amount = int(amount)
+        payload = change_line.split(":", 1)[1].strip()
     except Exception:
+        return result
+
+    if not payload or payload == "0":
+        return result
+
+    parts = [p.strip() for p in payload.split(",") if p.strip()]
+    for part in parts:
+        if "x" not in part:
+            continue
+
+        left, right = part.split("x", 1)
+        try:
+            denom = int(left.strip())
+            qty = int(right.strip())
+        except Exception:
+            continue
+
+        if denom in (20, 5, 1) and qty > 0:
+            result[denom] = qty
+
+    return result
+
+
+def _estimate_change_timeout(normalized: dict) -> int:
+    """
+    Estimate how long the Arduino will need.
+    Uses generous values so the Pi does not give up too early.
+    """
+    count20 = int(normalized.get(20, 0))
+    count5 = int(normalized.get(5, 0))
+    count1 = int(normalized.get(1, 0))
+
+    # Conservative estimates in seconds per coin
+    sec_per_20 = 5.5
+    sec_per_5 = 4.0
+    sec_per_1 = 3.5
+
+    base = 8.0
+    group_pause = 2.0
+
+    groups = 0
+    if count20 > 0:
+        groups += 1
+    if count5 > 0:
+        groups += 1
+    if count1 > 0:
+        groups += 1
+
+    estimated = (
+        base
+        + (count20 * sec_per_20)
+        + (count5 * sec_per_5)
+        + (count1 * sec_per_1)
+        + max(0, groups - 1) * group_pause
+    )
+
+    # Add margin
+    estimated += 8.0
+
+    # Never too short
+    return max(20, int(round(estimated)))
+
+
+def send_change_command(breakdown: dict):
+    command_payload, normalized = _build_change_command_payload(breakdown)
+
+    if not normalized:
         return {
             "success": False,
-            "message": "Invalid change amount.",
+            "message": "Invalid or empty change breakdown.",
+            "requested_breakdown": {},
+            "confirmed_breakdown": {},
             "replies": [],
         }
 
-    if amount <= 0:
-        return {
-            "success": False,
-            "message": "Change amount must be greater than zero.",
-            "replies": [],
-        }
+    timeout = _estimate_change_timeout(normalized)
 
-    replies = _send_command_and_collect(f"DISPENSE_CHANGE:{amount}\n", timeout=SERIAL_TIMEOUT)
+    replies = _send_command_and_collect(
+        f"DISPENSE_CHANGE:{command_payload}\n",
+        timeout=timeout
+    )
 
     got_ok = False
     change_line = None
     error_line = None
-    stock_line = None
-    status_line = None
     busy = False
 
     for line in replies:
@@ -414,34 +423,15 @@ def send_change_command(amount):
             busy = True
         elif upper.startswith("CHANGE_DISPENSED:"):
             change_line = line
-        elif upper.startswith("COIN_STOCK:"):
-            stock_line = line
-        elif upper.startswith("COIN_STATUS:"):
-            status_line = line
         elif upper.startswith("ERROR:"):
             error_line = line
-
-    stock = {}
-    status = {}
-
-    if stock_line:
-        try:
-            stock = _parse_coin_stock_line(stock_line)
-        except Exception:
-            stock = {}
-
-    if status_line:
-        try:
-            status = _parse_coin_status_line(status_line)
-        except Exception:
-            status = {}
 
     if busy:
         return {
             "success": False,
             "message": "Arduino is busy.",
-            "stock": stock,
-            "status": status,
+            "requested_breakdown": normalized,
+            "confirmed_breakdown": {},
             "replies": replies,
         }
 
@@ -449,17 +439,31 @@ def send_change_command(amount):
         return {
             "success": False,
             "message": error_line,
-            "stock": stock,
-            "status": status,
+            "requested_breakdown": normalized,
+            "confirmed_breakdown": {},
             "replies": replies,
         }
 
     if change_line:
+        confirmed = _parse_change_dispensed_line(change_line)
+
+        if confirmed != normalized:
+            return {
+                "success": False,
+                "message": (
+                    f"Arduino confirmed a different breakdown. "
+                    f"Requested={normalized}, Confirmed={confirmed}"
+                ),
+                "requested_breakdown": normalized,
+                "confirmed_breakdown": confirmed,
+                "replies": replies,
+            }
+
         return {
             "success": True,
             "message": change_line,
-            "stock": stock,
-            "status": status,
+            "requested_breakdown": normalized,
+            "confirmed_breakdown": confirmed,
             "replies": replies,
         }
 
@@ -467,16 +471,16 @@ def send_change_command(amount):
         return {
             "success": False,
             "message": "Command accepted, but no final CHANGE_DISPENSED confirmation was received.",
-            "stock": stock,
-            "status": status,
+            "requested_breakdown": normalized,
+            "confirmed_breakdown": {},
             "replies": replies,
         }
 
     return {
         "success": False,
         "message": "No valid change response received from Arduino.",
-        "stock": stock,
-        "status": status,
+        "requested_breakdown": normalized,
+        "confirmed_breakdown": {},
         "replies": replies,
     }
 

@@ -2,6 +2,7 @@ from frontend import tk_compat as ctk
 from frontend import theme
 from frontend.widgets import AppShell, RoundedCard, PillButton, card_body
 from config_manager import config
+from backend.device_sync import mark_inventory_dirty, push_inventory_if_dirty
 
 import threading
 
@@ -297,8 +298,22 @@ class ChangeDispensingPage(ctk.CTkFrame):
     def _dispense_change_thread(self):
         try:
             amount = int(round(self.change))
-            result = send_change_command(amount)
-            self.after(0, lambda r=result: self._on_dispense_finished(r))
+            breakdown = config.compute_change_breakdown(amount)
+
+            if breakdown is None:
+                self.after(
+                    0,
+                    lambda: self._on_dispense_failed("Cannot compute exact change breakdown.")
+                )
+                return
+
+            result = send_change_command(breakdown)
+
+            self.after(
+                0,
+                lambda r=result: self._on_dispense_finished(r)
+            )
+
         except Exception as e:
             self.after(0, lambda err=str(e): self._on_dispense_failed(err))
 
@@ -317,7 +332,10 @@ class ChangeDispensingPage(ctk.CTkFrame):
             if parsed_breakdown:
                 try:
                     applied = config.apply_change_breakdown(parsed_breakdown)
-                    if not applied:
+                    if applied:
+                        mark_inventory_dirty()
+                        threading.Thread(target=push_inventory_if_dirty, daemon=True).start()
+                    else:
                         print("[CHANGE] Failed to deduct coin stock from inventory.json", flush=True)
                 except Exception as e:
                     print(f"[CHANGE] Inventory deduction failed: {e}", flush=True)

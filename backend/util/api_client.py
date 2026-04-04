@@ -36,11 +36,32 @@ def _device_api_key() -> str:
     return os.getenv("DEVICE_API_KEY", "").strip()
 
 
+def _booth_device_id() -> str:
+    reload_env()
+    return os.getenv("BOOTH_DEVICE_ID", "").strip()
+
+
+def _booth_device_secret() -> str:
+    reload_env()
+    return os.getenv("BOOTH_DEVICE_SECRET", "").strip()
+
+
 def _headers() -> dict:
     headers = {}
+
     api_key = _device_api_key()
+    booth_device_id = _booth_device_id()
+    booth_device_secret = _booth_device_secret()
+
     if api_key:
         headers["x-device-api-key"] = api_key
+
+    if booth_device_id:
+        headers["x-booth-device-id"] = booth_device_id
+
+    if booth_device_secret:
+        headers["x-booth-device-secret"] = booth_device_secret
+
     return headers
 
 
@@ -82,11 +103,7 @@ def verify_login_qr(qr_code: str):
     payload = {
         "qrCode": str(qr_code).strip() if qr_code else ""
     }
-    print("[API] verify_login_qr payload:", repr(payload), flush=True)
-    res = post_json("/api/qr-tokens/verify", payload)
-    print("[API] verify_login_qr status:", res.status_code, flush=True)
-    print("[API] verify_login_qr body:", res.text, flush=True)
-    return res
+    return post_json("/api/qr-tokens/verify", payload)
 
 
 def validate_discount_token(user_id: str, token: str):
@@ -94,11 +111,7 @@ def validate_discount_token(user_id: str, token: str):
         "userId": str(user_id).strip() if user_id else "",
         "token": str(token).strip() if token else "",
     }
-    print("[API] validate_discount_token payload:", repr(payload), flush=True)
-    res = post_json("/api/qr-tokens/validate", payload)
-    print("[API] validate_discount_token status:", res.status_code, flush=True)
-    print("[API] validate_discount_token body:", res.text, flush=True)
-    return res
+    return post_json("/api/qr-tokens/validate", payload)
 
 
 def store_qr_token(user_id: str, token: str):
@@ -106,11 +119,7 @@ def store_qr_token(user_id: str, token: str):
         "userId": str(user_id).strip() if user_id else "",
         "token": str(token).strip() if token else "",
     }
-    print("[API] store_qr_token payload:", repr(payload), flush=True)
-    res = post_json("/api/qr-tokens", payload)
-    print("[API] store_qr_token status:", res.status_code, flush=True)
-    print("[API] store_qr_token body:", res.text, flush=True)
-    return res
+    return post_json("/api/qr-tokens", payload)
 
 
 def post_transaction(payload: dict):
@@ -136,6 +145,18 @@ def upload_receipt(user_id: str, timestamp: str, receipt_data: dict):
         "receipt": receipt_data,
     }
     return post_json("/api/receipts/upload", payload, timeout=20)
+
+
+def get_device_config():
+    return get_json("/api/device/config", timeout=15)
+
+
+def post_device_presence(payload: dict):
+    return post_json("/api/device/heartbeat", payload, timeout=10)
+
+
+def post_device_inventory(payload: dict):
+    return post_json("/api/device/inventory", payload, timeout=15)
 
 
 def upload_image(

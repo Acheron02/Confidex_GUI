@@ -292,22 +292,34 @@
   "products": [
     {
       "product_id": "HIV123",
-      "name": "Confidex Kit",
+      "name": "HIV Confidex Kit",
       "type": "HIV Test",
-      "price": 80,
-      "enabled": true
+      "price": 50,
+      "enabled": true,
+      "dispense_slot": "KIT1"
     },
     {
       "product_id": "DENGUE123",
-      "name": "Confidex Kit",
+      "name": "Dengue Confidex Kit",
       "type": "Dengue Test",
-      "price": 70,
-      "enabled": true
+      "price": 60,
+      "enabled": true,
+      "dispense_slot": "KIT2"
     }
   ],
   "payment": {
-    "accepted_bills": [50, 100, 200, 500, 1000],
-    "change_denominations": [20, 5, 1]
+    "accepted_bills": [
+      50,
+      100,
+      200,
+      500,
+      1000
+    ],
+    "change_denominations": [
+      20,
+      5,
+      1
+    ]
   },
   "hardware": {
     "bill_acceptor_pulse_pin": 17,

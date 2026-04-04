@@ -21,6 +21,7 @@ from pages.cash_bill_check_page import CashBillCheckPage
 from pages.change_dispensing_page import ChangeDispensingPage
 
 from backend.util.dispenser_serial import send_bill_off_command
+from backend.device_sync import start_background_sync
 
 
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -139,6 +140,8 @@ if __name__ == "__main__":
     time.sleep(1)
 
     ensure_bill_acceptor_off()
+
+    start_background_sync()
 
     app = App()
     app.mainloop()

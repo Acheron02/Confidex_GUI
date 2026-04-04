@@ -11,12 +11,21 @@ from config_manager import config
 
 
 class ProductTile(OutlineTile):
+    TILE_HEIGHT = 220
+
     def __init__(self, master, product, select_callback):
-        super().__init__(master, pad=16, auto_size=False)
+        super().__init__(
+            master,
+            pad=16,
+            auto_size=False,
+            height=self.TILE_HEIGHT,
+        )
         self.product = product
         self.select_callback = select_callback
         self.selected = False
         self.available = bool(product.get("available", True))
+
+        self.grid_propagate(False)
 
         body = self.content
         body.grid_rowconfigure(0, weight=1)
@@ -42,10 +51,10 @@ class ProductTile(OutlineTile):
             font=theme.font(20, "bold"),
             text_color=theme.BLACK if self.available else theme.MUTED,
             fg_color=theme.WHITE,
-            wraplength=220,
+            wraplength=260,
             justify="center"
         )
-        self.name.grid(row=1, column=0, sticky="n", padx=8, pady=4)
+        self.name.grid(row=1, column=0, sticky="n", padx=12, pady=4)
 
         self.price = ctk.CTkLabel(
             body,
@@ -74,9 +83,19 @@ class ProductTile(OutlineTile):
         )
         self.stock_label.grid(row=3, column=0, sticky="n", pady=(0, 6))
 
+        self.bind("<Configure>", self._on_resize, add="+")
+        body.bind("<Configure>", self._on_resize, add="+")
+
         if self.available:
             for w in (self, self.canvas, body, self.icon, self.name, self.price, self.stock_label):
                 w.bind("<Button-1>", lambda e: self.select_callback(self))
+
+    def _on_resize(self, event=None):
+        try:
+            width = max(180, self.content.winfo_width() - 24)
+            self.name.configure(wraplength=width)
+        except Exception:
+            pass
 
     def set_selected(self, selected: bool):
         if not self.available:
@@ -157,6 +176,7 @@ class PurchasePage(ctk.CTkFrame):
         self.discount_applied_token = None
         self._config_refresh_job = None
         self._last_products_signature = None
+        self._empty_tiles_label = None
 
         self.shell = AppShell(self, title_right=f"Welcome, {self.username}!")
         self.shell.pack(fill="both", expand=True)
@@ -209,9 +229,6 @@ class PurchasePage(ctk.CTkFrame):
 
         self.tiles_frame = ctk.CTkFrame(left_body, fg_color=theme.WHITE)
         self.tiles_frame.grid(row=1, column=0, sticky="nsew", padx=12, pady=(0, 12))
-        self.tiles_frame.grid_rowconfigure(0, weight=1)
-        self.tiles_frame.grid_columnconfigure(0, weight=1, uniform="product-col")
-        self.tiles_frame.grid_columnconfigure(1, weight=1, uniform="product-col")
 
         right_body.grid_rowconfigure(0, weight=0)
         right_body.grid_rowconfigure(1, weight=1)
@@ -300,15 +317,42 @@ class PurchasePage(ctk.CTkFrame):
         products = []
         for product in config.get_enabled_products():
             product_id = product.get("product_id")
+            if not product_id:
+                continue
+
             stock = config.get_product_stock(product_id)
             merged = product.copy()
             merged["stock"] = stock
-            merged["available"] = stock > 0
+            merged["available"] = stock > 0 and bool(product.get("enabled", True))
             products.append(merged)
         return products
 
     def _make_products_signature(self, products):
         return json.dumps(products, sort_keys=True)
+
+    def _clear_tiles_frame(self):
+        for child in self.tiles_frame.winfo_children():
+            try:
+                child.destroy()
+            except Exception:
+                pass
+
+        self.tiles = []
+        self._empty_tiles_label = None
+
+        for col in range(3):
+            self.tiles_frame.grid_columnconfigure(col, weight=0, uniform="")
+        for row in range(10):
+            self.tiles_frame.grid_rowconfigure(row, weight=0)
+
+    def _get_column_count(self, item_count: int) -> int:
+        if item_count <= 0:
+            return 1
+        if item_count == 1:
+            return 1
+        if item_count == 2:
+            return 2
+        return 3
 
     def reload_products(self, force=False):
         new_products = self._build_products_from_config()
@@ -320,17 +364,39 @@ class PurchasePage(ctk.CTkFrame):
         self._last_products_signature = new_signature
         self.products = new_products
 
-        for tile in getattr(self, "tiles", []):
-            try:
-                tile.destroy()
-            except Exception:
-                pass
+        self._clear_tiles_frame()
 
-        self.tiles = []
+        if not self.products:
+            self.tiles_frame.grid_columnconfigure(0, weight=1)
+            self.tiles_frame.grid_rowconfigure(0, weight=1)
+
+            self._empty_tiles_label = ctk.CTkLabel(
+                self.tiles_frame,
+                text="No products available",
+                font=theme.font(18, "bold"),
+                text_color=theme.MUTED,
+                fg_color=theme.WHITE
+            )
+            self._empty_tiles_label.grid(row=0, column=0, pady=24, sticky="n")
+            self.tiles.append(self._empty_tiles_label)
+            self.update_order_summary()
+            return
+
+        column_count = self._get_column_count(len(self.products))
+
+        for col in range(column_count):
+            self.tiles_frame.grid_columnconfigure(col, weight=1, uniform="product-col")
+
+        row_count = (len(self.products) + column_count - 1) // column_count
+        for row in range(row_count):
+            self.tiles_frame.grid_rowconfigure(row, weight=1)
 
         for index, product in enumerate(self.products):
+            row = index // column_count
+            col = index % column_count
+
             tile = ProductTile(self.tiles_frame, product, self.on_tile_selected)
-            tile.grid(row=0, column=index, sticky="nsew", padx=10, pady=10)
+            tile.grid(row=row, column=col, sticky="nsew", padx=10, pady=10)
             self.tiles.append(tile)
 
         if self.selected_product:
@@ -346,7 +412,7 @@ class PurchasePage(ctk.CTkFrame):
                 self.selected_product = still_exists
                 self.selected_tile = None
                 for tile in self.tiles:
-                    if tile.product.get("product_id") == selected_id:
+                    if isinstance(tile, ProductTile) and tile.product.get("product_id") == selected_id:
                         self.selected_tile = tile
                         tile.set_selected(True)
                         break
@@ -389,6 +455,29 @@ class PurchasePage(ctk.CTkFrame):
         self._refresh_from_config()
         self._config_refresh_job = self.after(self.REFRESH_MS, self._start_config_refresh)
 
+    def _resolve_latest_selected_product(self):
+        if not self.selected_product:
+            return None
+
+        selected_id = (
+            self.selected_product.get("product_id")
+            or self.selected_product.get("productID")
+            or self.selected_product.get("id")
+        )
+
+        if not selected_id:
+            return None
+
+        latest_product = config.get_product_by_id(selected_id)
+        if not latest_product:
+            return None
+
+        stock = config.get_product_stock(selected_id)
+        merged = latest_product.copy()
+        merged["stock"] = stock
+        merged["available"] = stock > 0 and bool(latest_product.get("enabled", True))
+        return merged
+
     def update_order_summary(self):
         if not self.selected_product:
             self.order_text.configure(
@@ -424,8 +513,11 @@ class PurchasePage(ctk.CTkFrame):
             text_color="#999999",
         )
 
-        self.pay_btn.configure(state="normal")
-        self.scan_btn.configure(state="normal" if not self.scan_disabled else "disabled")
+        is_available = bool(self.selected_product.get("available", False))
+        self.pay_btn.configure(state="normal" if is_available else "disabled")
+        self.scan_btn.configure(
+            state="normal" if is_available and not self.scan_disabled else "disabled"
+        )
 
     def update_data(self, user_data=None, **kwargs):
         if user_data:
@@ -490,6 +582,22 @@ class PurchasePage(ctk.CTkFrame):
     def start_scan(self):
         if self.scan_disabled or not self.selected_product or self.validation_in_progress:
             return
+
+        latest = self._resolve_latest_selected_product()
+        if latest is None or not latest.get("available", False):
+            self.selected_product = None
+            self.selected_tile = None
+            self.discount = None
+            self.scan_disabled = False
+            self.reload_products(force=True)
+            self.status_label.configure(
+                text=config.get("purchase_page", "out_of_stock_text", default="OUT OF STOCK"),
+                text_color=theme.ERROR
+            )
+            return
+
+        self.selected_product = latest
+        self.update_order_summary()
 
         self.qr_buffer = ""
         self.last_scanned_token = None
@@ -564,7 +672,7 @@ class PurchasePage(ctk.CTkFrame):
             self.last_scanned_token = scanned
             self.validation_in_progress = True
 
-            if self.listener:
+            if self.listener:   
                 self.listener.stop()
                 self.listener = None
 
@@ -638,19 +746,37 @@ class PurchasePage(ctk.CTkFrame):
             self.validation_in_progress = False
 
     def go_to_payment(self):
-        if self.selected_product and self.user_data:
-            self.controller.show_loading_then(
-                config.get(
-                    "purchase_page",
-                    "payment_loading_text",
-                    default="Preparing payment options"
-                ),
-                "PaymentMethodPage",
-                delay=1000,
-                user_data=self.user_data,
-                selected_product=self.selected_product,
-                discount=self.discount or 0
+        if not self.selected_product or not self.user_data:
+            return
+
+        latest = self._resolve_latest_selected_product()
+        if latest is None or not latest.get("available", False):
+            self.selected_product = None
+            self.selected_tile = None
+            self.discount = None
+            self.scan_disabled = False
+            self.reload_products(force=True)
+            self.status_label.configure(
+                text=config.get("purchase_page", "out_of_stock_text", default="OUT OF STOCK"),
+                text_color=theme.ERROR
             )
+            return
+
+        self.selected_product = latest
+        self.update_order_summary()
+
+        self.controller.show_loading_then(
+            config.get(
+                "purchase_page",
+                "payment_loading_text",
+                default="Preparing payment options"
+            ),
+            "PaymentMethodPage",
+            delay=1000,
+            user_data=self.user_data,
+            selected_product=self.selected_product.copy(),
+            discount=self.discount or 0
+        )
 
     def reset_fields(self, **kwargs):
         if self.listener:
@@ -667,7 +793,8 @@ class PurchasePage(ctk.CTkFrame):
         self.discount_applied_token = None
 
         for tile in getattr(self, "tiles", []):
-            tile.set_selected(False)
+            if isinstance(tile, ProductTile):
+                tile.set_selected(False)
 
         self.order_text.configure(
             text=config.get("purchase_page", "no_item_selected_text", default="No item selected"),

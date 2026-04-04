@@ -2,6 +2,7 @@ from frontend import tk_compat as ctk
 from frontend import theme
 from frontend.widgets import AppShell, RoundedCard, OutlineTile, PillButton, card_body
 from config_manager import config
+from PIL import Image, ImageTk
 
 
 class PaymentMethodPage(ctk.CTkFrame):
@@ -77,7 +78,7 @@ class PaymentMethodPage(ctk.CTkFrame):
             config.get("payment_method_page", "cash_title", default="CASH"),
             config.get("payment_method_page", "cash_subtitle", default="Settle payment via the machine slot"),
             lambda: self.proceed_payment("cash"),
-            add_logo_row=False
+            logos=None
         )
         self.cash_tile.grid(row=1, column=0, pady=(0, 16), padx=40, sticky="ew")
 
@@ -86,7 +87,11 @@ class PaymentMethodPage(ctk.CTkFrame):
             config.get("payment_method_page", "online_title", default="E-WALLETS"),
             config.get("payment_method_page", "online_subtitle", default="Pay via GCash, Maya, or QRPh"),
             lambda: self.proceed_payment("online"),
-            add_logo_row=False
+            logos=[
+                ("assets/gcash.png", (80, 32)),
+                ("assets/maya.png", (80, 32)),
+                ("assets/qrph.png", (80, 32)),
+            ]
         )
         self.online_tile.grid(row=2, column=0, pady=(0, 16), padx=40, sticky="ew")
 
@@ -103,7 +108,32 @@ class PaymentMethodPage(ctk.CTkFrame):
 
         self._start_config_refresh()
 
-    def _create_option(self, master, title, subtitle, command, add_logo_row=False):
+    def _load_logo_image(self, path, size):
+        try:
+            img = Image.open(path).convert("RGBA")
+            img.thumbnail(size, Image.LANCZOS)
+
+            # center the logo on a fixed canvas so all logos align nicely
+            canvas = Image.new("RGBA", size, (255, 255, 255, 0))
+            x = (size[0] - img.width) // 2
+            y = (size[1] - img.height) // 2
+            canvas.paste(img, (x, y), img)
+
+            tk_img = ImageTk.PhotoImage(canvas)
+            self.logo_refs.append(tk_img)   # keep reference alive
+            return tk_img
+        except Exception as e:
+            print(f"[PAYMENT METHOD] Failed to load logo {path}: {e}", flush=True)
+            return None
+
+    def _bind_click_recursive(self, widgets, command):
+        for w in widgets:
+            try:
+                w.bind("<Button-1>", lambda e, cmd=command: cmd())
+            except Exception:
+                pass
+
+    def _create_option(self, master, title, subtitle, command, logos=None):
         tile = OutlineTile(master, auto_size=True, pad=25)
         body = card_body(tile)
 
@@ -128,11 +158,40 @@ class PaymentMethodPage(ctk.CTkFrame):
         )
         subtitle_label.pack(pady=(0, 12), anchor="center")
 
-        for w in (tile, tile.canvas, body, title_label, subtitle_label):
-            w.bind("<Button-1>", lambda e: command())
+        logo_widgets = []
+        logo_row = None
+
+        if logos:
+            logo_row = ctk.CTkFrame(body, fg_color=theme.WHITE)
+            logo_row.pack(pady=(0, 12), anchor="center")
+
+            for path, size in logos:
+                tk_img = self._load_logo_image(path, size)
+                if tk_img is None:
+                    continue
+
+                lbl = ctk.CTkLabel(
+                    logo_row,
+                    image=tk_img,
+                    text="",
+                    fg_color=theme.WHITE
+                )
+                lbl.pack(side="left", padx=10)
+                logo_widgets.append(lbl)
+
+        widgets_to_bind = [tile, body, title_label, subtitle_label]
+        if hasattr(tile, "canvas"):
+            widgets_to_bind.append(tile.canvas)
+        if logo_row is not None:
+            widgets_to_bind.append(logo_row)
+        widgets_to_bind.extend(logo_widgets)
+
+        self._bind_click_recursive(widgets_to_bind, command)
 
         tile._title_label = title_label
         tile._subtitle_label = subtitle_label
+        tile._logo_row = logo_row
+        tile._logo_widgets = logo_widgets
         return tile
 
     def _refresh_from_config(self):

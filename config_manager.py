@@ -143,18 +143,25 @@ class JsonStore:
             return False
 
         with self._lock:
-            node = self._data
+            next_data = copy.deepcopy(self._data)
+            node = next_data
             for key in keys[:-1]:
                 if key not in node or not isinstance(node[key], dict):
                     node[key] = {}
                 node = node[key]
 
+            if node.get(keys[-1]) == value:
+                return True
+
             node[keys[-1]] = value
+            self._data = next_data
 
         return self.save()
 
     def replace_all(self, data: dict) -> bool:
         with self._lock:
+            if self._data == data:
+                return True
             self._data = copy.deepcopy(data)
         return self.save()
 
@@ -167,15 +174,32 @@ class ConfigManager:
     def __init__(self):
         self.config_store = JsonStore(CONFIG_PATH, "CONFIG")
         self.inventory_store = JsonStore(INVENTORY_PATH, "INVENTORY")
+        self.ensure_inventory_matches_products()
 
-    # -------------------------
-    # Generic config getters
-    # -------------------------
     def get(self, *keys, default=None):
         return self.config_store.get(*keys, default=default)
 
     def set(self, *keys, value) -> bool:
-        return self.config_store.set(*keys, value=value)
+        ok = self.config_store.set(*keys, value=value)
+        if ok and (len(keys) == 1 and keys[0] == "products"):
+            self.ensure_inventory_matches_products()
+        return ok
+
+    def merge_remote_config(self, partial_config: dict) -> bool:
+        try:
+            if not isinstance(partial_config, dict):
+                return False
+
+            current = self.config_store.snapshot()
+            merged = copy.deepcopy(current)
+
+            for key, value in partial_config.items():
+                merged[key] = value
+
+            return self.config_store.replace_all(merged)
+        except Exception as e:
+            print(f"[CONFIG] merge_remote_config failed: {e}", flush=True)
+            return False
 
     def get_inventory(self, *keys, default=None):
         return self.inventory_store.get(*keys, default=default)
@@ -183,9 +207,6 @@ class ConfigManager:
     def set_inventory(self, *keys, value) -> bool:
         return self.inventory_store.set(*keys, value=value)
 
-    # -------------------------
-    # Product helpers
-    # -------------------------
     def get_products(self):
         return self.get("products", default=[])
 
@@ -227,9 +248,42 @@ class ConfigManager:
             return False
         return self.get_product_stock(product_id) > 0
 
-    # -------------------------
-    # Coin helpers
-    # -------------------------
+    def ensure_inventory_matches_products(self) -> bool:
+        try:
+            products = self.get_products()
+            current_inventory = self.get_inventory("products", default={}) or {}
+
+            next_inventory = {}
+
+            for product in products:
+                product_id = str(product.get("product_id", "")).strip()
+                if not product_id:
+                    continue
+
+                existing = current_inventory.get(product_id, {})
+                next_inventory[product_id] = {
+                    "stock": max(0, int(existing.get("stock", 0)))
+                }
+
+            current_coins = self.get_inventory("coins", default={}) or {
+                "20": {"stock": 0, "enabled": True},
+                "5": {"stock": 0, "enabled": True},
+                "1": {"stock": 0, "enabled": True},
+            }
+
+            next_data = {
+                "products": next_inventory,
+                "coins": current_coins,
+            }
+
+            if self.inventory_store.snapshot() == next_data:
+                return True
+
+            return self.inventory_store.replace_all(next_data)
+        except Exception as e:
+            print(f"[CONFIG] ensure_inventory_matches_products failed: {e}", flush=True)
+            return False
+
     def get_coin_stock(self, denomination: int) -> int:
         stock = self.get_inventory("coins", str(denomination), "stock", default=0)
         try:
@@ -277,9 +331,6 @@ class ConfigManager:
         result.sort(key=lambda x: x["denomination"], reverse=True)
         return result
 
-    # -------------------------
-    # Change helpers
-    # -------------------------
     def get_change_denominations(self):
         denoms = self.get("payment", "change_denominations", default=[20, 5, 1])
         cleaned = []

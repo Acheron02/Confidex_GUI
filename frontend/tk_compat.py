@@ -17,6 +17,49 @@ def _normalize_color(color, master=None, default='#F5F2DE'):
         return color[0]
     return color
 
+class CTkImage:
+    def __init__(self, light_image=None, dark_image=None, size=None):
+        self.light_image = light_image
+        self.dark_image = dark_image if dark_image is not None else light_image
+        self.size = size
+        self._cache = {}
+
+    def _select_source(self):
+        return self.light_image or self.dark_image
+
+    def get_tk_image(self):
+        src = self._select_source()
+        if src is None:
+            return None
+
+        cache_key = (id(src), self.size)
+
+        if cache_key in self._cache:
+            return self._cache[cache_key]
+
+        if ImageTk is None:
+            return src
+
+        try:
+            if Image is not None and isinstance(src, Image.Image):
+                prepared = _resize_pil_image(src, self.size)
+                tk_img = ImageTk.PhotoImage(prepared)
+            else:
+                tk_img = src
+        except Exception:
+            tk_img = src
+
+        self._cache[cache_key] = tk_img
+        return tk_img
+
+    def configure(self, light_image=None, dark_image=None, size=None):
+        if light_image is not None:
+            self.light_image = light_image
+        if dark_image is not None:
+            self.dark_image = dark_image
+        if size is not None:
+            self.size = size
+        self._cache.clear()
 
 class CTkFont(tkfont.Font):
     def __init__(self, family='Arial', size=12, weight='normal', **kwargs):

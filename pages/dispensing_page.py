@@ -4,6 +4,7 @@ from frontend import theme
 from frontend.widgets import AppShell, RoundedCard, card_body
 from backend.util.dispenser_serial import send_dispense_command
 from config_manager import config
+from backend.device_sync import mark_inventory_dirty, push_inventory_if_dirty
 
 
 class DispensingPage(ctk.CTkFrame):
@@ -215,9 +216,18 @@ class DispensingPage(ctk.CTkFrame):
                 or self.product.get("product_id")
                 or self.product.get("id")
             )
+
             if product_id:
                 try:
-                    config.decrement_product_stock(str(product_id), 1)
+                    updated = config.decrement_product_stock(str(product_id), 1)
+                    if updated:
+                        mark_inventory_dirty()
+                        threading.Thread(target=push_inventory_if_dirty, daemon=True).start()
+                    else:
+                        print(
+                            f"[DISPENSING] Stock not decremented for product_id={product_id}",
+                            flush=True,
+                        )
                 except Exception as e:
                     print(f"[DISPENSING] Failed to decrement stock: {e}", flush=True)
 
