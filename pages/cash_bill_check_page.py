@@ -76,83 +76,127 @@ class CashBillCheckPage(ctk.CTkFrame):
 
         left_body = card_body(self.left_card)
         left_body.grid_columnconfigure(0, weight=1)
-
         left_body.grid_rowconfigure(0, weight=1)
-        left_body.grid_rowconfigure(1, weight=0)
-        left_body.grid_rowconfigure(2, weight=0)
-        left_body.grid_rowconfigure(3, weight=0)
-        left_body.grid_rowconfigure(4, weight=0)
-        left_body.grid_rowconfigure(5, weight=1)
+
+        # Center the whole content block vertically and horizontally
+        self.left_center_wrap = ctk.CTkFrame(left_body, fg_color=theme.WHITE)
+        self.left_center_wrap.grid(row=0, column=0, sticky="nsew", padx=16, pady=16)
+        self.left_center_wrap.grid_columnconfigure(0, weight=1)
+        self.left_center_wrap.grid_rowconfigure(0, weight=1)
+        self.left_center_wrap.grid_rowconfigure(1, weight=0)
+        self.left_center_wrap.grid_rowconfigure(2, weight=0)
+        self.left_center_wrap.grid_rowconfigure(3, weight=0)
+        self.left_center_wrap.grid_rowconfigure(4, weight=0)
+        self.left_center_wrap.grid_rowconfigure(5, weight=0)
+        self.left_center_wrap.grid_rowconfigure(6, weight=1)
+
+        self.header_block = ctk.CTkFrame(self.left_center_wrap, fg_color=theme.WHITE)
+        self.header_block.grid(row=1, column=0, sticky="ew", padx=10, pady=(0, 14))
+        self.header_block.grid_columnconfigure(0, weight=1)
 
         self.title_label = ctk.CTkLabel(
-            left_body,
+            self.header_block,
             text=config.get("cash_bill_check_page", "prompt_title", default="Enter the Amount of Bill"),
-            font=theme.heavy(24),
+            font=theme.heavy(28),
             text_color=theme.BLACK,
             fg_color=theme.WHITE,
             wraplength=470,
             justify="center"
         )
-        self.title_label.grid(row=1, column=0, padx=24, pady=(18, 10), sticky="ew")
+        self.title_label.grid(row=0, column=0, padx=18, pady=(0, 6), sticky="ew")
 
-        self.summary_label = ctk.CTkLabel(
-            left_body,
-            text="",
-            font=theme.font(16, "bold"),
+        self.helper_label = ctk.CTkLabel(
+            self.header_block,
+            text=config.get(
+                "cash_bill_check_page",
+                "helper_text",
+                default="Type the bill value you plan to insert."
+            ),
+            font=theme.font(15, "bold"),
             text_color=theme.MUTED,
             fg_color=theme.WHITE,
             wraplength=470,
             justify="center"
         )
-        self.summary_label.grid(row=2, column=0, padx=24, pady=(0, 16), sticky="ew")
+        self.helper_label.grid(row=1, column=0, padx=24, pady=(0, 0), sticky="ew")
+
+        self.summary_card = ctk.CTkFrame(
+            self.left_center_wrap,
+            fg_color=theme.CREAM,
+            corner_radius=18
+        )
+        self.summary_card.grid(row=2, column=0, sticky="ew", padx=10, pady=(0, 14))
+        self.summary_card.grid_columnconfigure(0, weight=1)
+
+        self.summary_label = ctk.CTkLabel(
+            self.summary_card,
+            text="",
+            font=theme.font(17, "bold"),
+            text_color=theme.BLACK,
+            fg_color=theme.CREAM,
+            wraplength=460,
+            justify="center"
+        )
+        self.summary_label.grid(row=0, column=0, padx=18, pady=16, sticky="ew")
 
         self.input_card = RoundedCard(
-            left_body,
+            self.left_center_wrap,
             auto_size=False,
-            height=120,
+            height=132,
             pad=8
         )
-        self.input_card.grid(row=3, column=0, padx=18, pady=(0, 14), sticky="ew")
+        self.input_card.grid(row=3, column=0, padx=10, pady=(0, 14), sticky="ew")
         self.input_card.grid_propagate(False)
 
         input_body = card_body(self.input_card)
         input_body.pack_propagate(False)
 
+        input_inner = ctk.CTkFrame(input_body, fg_color=theme.WHITE)
+        input_inner.pack(fill="both", expand=True)
+        input_inner.grid_columnconfigure(0, weight=1)
+        input_inner.grid_columnconfigure(1, weight=0)
+        input_inner.grid_columnconfigure(2, weight=4)
+        input_inner.grid_rowconfigure(0, weight=1)
+
         self.currency_label = ctk.CTkLabel(
-            input_body,
+            input_inner,
             text="₱",
-            font=theme.heavy(38),
+            font=theme.heavy(42),
             text_color=theme.BLACK,
             fg_color=theme.WHITE
         )
-        self.currency_label.pack(side="left", padx=(24, 12), pady=20)
+        self.currency_label.grid(row=0, column=1, padx=(18, 8), pady=18, sticky="e")
 
         self.amount_entry = tk.Entry(
-            input_body,
+            input_inner,
             textvariable=self.amount_var,
-            font=("Arial", 34, "bold"),
+            font=("Arial", 36, "bold"),
             bd=0,
             relief="flat",
-            justify="left",
+            justify="center",
             bg=theme.WHITE,
             fg=theme.BLACK,
             insertbackground=theme.BLACK,
         )
-        self.amount_entry.pack(side="left", fill="both", expand=True, padx=(0, 24), pady=24)
+        self.amount_entry.grid(row=0, column=2, padx=(0, 24), pady=24, sticky="ew")
         self.amount_entry.bind("<KeyRelease>", self._on_entry_change)
         self.amount_entry.bind("<Return>", lambda e: self.submit_amount())
 
-        self.message_card = ctk.CTkFrame(left_body, fg_color=theme.WHITE)
-        self.message_card.grid(row=4, column=0, padx=18, pady=(0, 10), sticky="ew")
+        self.message_card = ctk.CTkFrame(
+            self.left_center_wrap,
+            fg_color=theme.WHITE,
+            corner_radius=18,
+            border_width=2,
+            border_color=theme.CREAM
+        )
+        self.message_card.grid(row=4, column=0, padx=10, pady=(0, 14), sticky="ew")
         self.message_card.grid_propagate(False)
-        self.message_card.configure(height=120)
-
-        message_body = self.message_card
-        message_body.grid_columnconfigure(0, weight=1)
-        message_body.grid_rowconfigure(0, weight=1)
+        self.message_card.configure(height=112)
+        self.message_card.grid_columnconfigure(0, weight=1)
+        self.message_card.grid_rowconfigure(0, weight=1)
 
         self.message_label = ctk.CTkLabel(
-            message_body,
+            self.message_card,
             text=config.get(
                 "cash_bill_check_page",
                 "default_message",
@@ -161,13 +205,35 @@ class CashBillCheckPage(ctk.CTkFrame):
             font=theme.font(16, "bold"),
             text_color=theme.MUTED,
             fg_color=theme.WHITE,
-            wraplength=470,
+            wraplength=450,
             justify="center"
         )
-        self.message_label.grid(row=0, column=0, padx=20, pady=18, sticky="nsew")
+        self.message_label.grid(row=0, column=0, padx=18, pady=16, sticky="nsew")
 
-        self.left_spacer = ctk.CTkFrame(left_body, fg_color=theme.WHITE)
-        self.left_spacer.grid(row=5, column=0, sticky="nsew")
+        # Warning / info area
+        self.warning_card = ctk.CTkFrame(
+            self.left_center_wrap,
+            fg_color=theme.CREAM,
+            corner_radius=18
+        )
+        self.warning_card.grid(row=5, column=0, padx=10, pady=(0, 0), sticky="ew")
+        self.warning_card.grid_columnconfigure(0, weight=1)
+
+        self.warning_label = ctk.CTkLabel(
+            self.warning_card,
+            text=(
+                "• Bills only\n"
+                "• Enough amount required\n"
+                "• Exact change only"
+            ),
+            font=theme.font(14, "bold"),
+            text_color=theme.MUTED,
+            fg_color=theme.CREAM,
+            wraplength=320,
+            justify="left",
+            anchor="center"
+        )
+        self.warning_label.grid(row=0, column=0, padx=18, pady=14, sticky="ew")
 
         self.right_card = RoundedCard(
             self.right_col,
@@ -208,9 +274,9 @@ class CashBillCheckPage(ctk.CTkFrame):
             self.left_card.configure(width=card_w, height=card_h)
             self.right_card.configure(width=card_w, height=card_h)
 
-            inner_w = max(260, card_w - 54)
-            self.input_card.configure(width=inner_w, height=120)
-            self.message_card.configure(width=inner_w, height=120)
+            inner_w = max(260, card_w - 68)
+            self.input_card.configure(width=inner_w, height=132)
+            self.message_card.configure(width=inner_w, height=112)
         except Exception:
             pass
 
@@ -224,6 +290,13 @@ class CashBillCheckPage(ctk.CTkFrame):
             )
             self.title_label.configure(
                 text=config.get("cash_bill_check_page", "prompt_title", default="Enter the Amount of Bill")
+            )
+            self.helper_label.configure(
+                text=config.get(
+                    "cash_bill_check_page",
+                    "helper_text",
+                    default="Type the bill value you plan to insert."
+                )
             )
         except Exception as e:
             print(f"[CASH BILL CHECK] Config refresh failed: {e}", flush=True)
@@ -261,13 +334,19 @@ class CashBillCheckPage(ctk.CTkFrame):
 
         total = self._compute_total()
 
+        summary_lines = [
+            f"{config.get('cash_bill_check_page', 'summary_product_label', default='Product')}: {self.selected_product.get('name', 'Unknown')}",
+            f"{config.get('cash_bill_check_page', 'summary_total_label', default='Total to pay')}: ₱{total:.2f}",
+        ]
+
+        if float(self.discount or 0) > 0:
+            summary_lines.append(
+                f"{config.get('cash_bill_check_page', 'summary_discount_label', default='Discount')}: {float(self.discount):.0f}%"
+            )
+
         self.summary_label.configure(
-            text=(
-                f"{config.get('cash_bill_check_page', 'summary_product_label', default='Product')}: "
-                f"{self.selected_product.get('name', 'Unknown')}\n"
-                f"{config.get('cash_bill_check_page', 'summary_total_label', default='Total to pay')}: ₱{total:.2f}\n"
-            ),
-            text_color=theme.MUTED
+            text="\n".join(summary_lines),
+            text_color=theme.BLACK
         )
 
         self._set_message(
@@ -430,7 +509,7 @@ class CashBillCheckPage(ctk.CTkFrame):
             return False, config.get(
                 "cash_bill_check_page",
                 "bill_too_large_text",
-                default="Bill is too large. Insert a smaller Bill."
+                default="Bill is too large. Insert a smaller bill."
             )
 
         return True, (

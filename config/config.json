@@ -294,7 +294,7 @@
       "product_id": "HIV123",
       "name": "HIV Confidex Kit",
       "type": "HIV Test",
-      "price": 50,
+      "price": 100,
       "enabled": true,
       "dispense_slot": "KIT1"
     },
@@ -302,7 +302,7 @@
       "product_id": "DENGUE123",
       "name": "Dengue Confidex Kit",
       "type": "Dengue Test",
-      "price": 60,
+      "price": 150,
       "enabled": true,
       "dispense_slot": "KIT2"
     }

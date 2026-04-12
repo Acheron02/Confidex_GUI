@@ -247,32 +247,45 @@ class PurchasePage(ctk.CTkFrame):
 
         self.order_box = ctk.CTkFrame(
             right_body,
-            fg_color="transparent",
-            border_color="#CCCCCC",
+            fg_color="#FAFAFA",
+            border_color="#E5E5E5",
             border_width=2,
-            corner_radius=12,
-            width=440,
-            height=320
+            corner_radius=16,
+            width=620,
+            height=560
         )
-        self.order_box.grid(row=1, column=0, pady=10)
+        self.order_box.grid(row=1, column=0, pady=10, padx=10, sticky="")
         self.order_box.grid_propagate(False)
 
-        self.order_text = ctk.CTkLabel(
-            self.order_box,
-            text=config.get("purchase_page", "no_item_selected_text", default="No item selected"),
-            font=theme.font(18, "bold"),
-            text_color="#999999",
-            justify="center",
-            wraplength=400
+        self.order_content = ctk.CTkFrame(self.order_box, fg_color="transparent")
+        self.order_content.place(
+            relx=0.5,
+            rely=0.5,
+            anchor="center",
+            relwidth=0.94,
+            relheight=0.92
         )
-        self.order_text.place(relx=0.5, rely=0.5, anchor="center")
+
+        self.empty_order_label = ctk.CTkLabel(
+            self.order_content,
+            text=config.get(
+                "purchase_page",
+                "no_item_selected_text",
+                default="Select a product to view details"
+            ),
+            font=theme.font(22, "bold"),
+            text_color=theme.MUTED,
+            justify="center",
+            wraplength=500
+        )
+        self.empty_order_label.place(relx=0.5, rely=0.5, anchor="center")
 
         self.status_label = ctk.CTkLabel(
             right_body,
             text="",
             font=theme.font(18, "bold"),
             text_color=theme.ERROR,
-            wraplength=380,
+            wraplength=520,
             justify="center",
             anchor="center",
             fg_color=theme.WHITE
@@ -289,8 +302,8 @@ class PurchasePage(ctk.CTkFrame):
         self.scan_btn = PillButton(
             btns,
             text=config.get("purchase_page", "discount_button_text", default="Discount"),
-            width=180,
-            height=58,
+            width=260,
+            height=80,
             command=self.start_scan,
             state="disabled",
             font=theme.font(19, "bold")
@@ -300,8 +313,8 @@ class PurchasePage(ctk.CTkFrame):
         self.pay_btn = PillButton(
             btns,
             text=config.get("purchase_page", "pay_button_text", default="Pay"),
-            width=180,
-            height=58,
+            width=260,
+            height=80,
             command=self.go_to_payment,
             state="disabled",
             font=theme.font(19, "bold")
@@ -353,6 +366,47 @@ class PurchasePage(ctk.CTkFrame):
         if item_count == 2:
             return 2
         return 3
+
+    def _clear_order_content(self):
+        for child in self.order_content.winfo_children():
+            try:
+                child.destroy()
+            except Exception:
+                pass
+
+    def _make_summary_row(self, parent, label, value, value_color=None, large=False):
+        row = ctk.CTkFrame(parent, fg_color="transparent")
+        row.pack(fill="x", pady=12, padx=12)
+
+        left = ctk.CTkLabel(
+            row,
+            text=label,
+            font=theme.font(18, "bold"),
+            text_color=theme.MUTED,
+            fg_color="transparent",
+            anchor="w",
+            justify="left",
+            wraplength=180
+        )
+        left.pack(side="left", anchor="w")
+
+        right = ctk.CTkLabel(
+            row,
+            text=value,
+            font=theme.font(28 if large else 22, "bold"),
+            text_color=value_color or theme.BLACK,
+            fg_color="transparent",
+            anchor="e",
+            justify="right",
+            wraplength=260
+        )
+        right.pack(side="right", anchor="e")
+
+        return row
+
+    def _make_divider(self, parent):
+        divider = ctk.CTkFrame(parent, fg_color="#E7E7E7", height=2, corner_radius=999)
+        divider.pack(fill="x", padx=10, pady=14)
 
     def reload_products(self, force=False):
         new_products = self._build_products_from_config()
@@ -479,11 +533,22 @@ class PurchasePage(ctk.CTkFrame):
         return merged
 
     def update_order_summary(self):
+        self._clear_order_content()
+
         if not self.selected_product:
-            self.order_text.configure(
-                text=config.get("purchase_page", "no_item_selected_text", default="No item selected"),
-                text_color=theme.MUTED
+            self.empty_order_label = ctk.CTkLabel(
+                self.order_content,
+                text=config.get(
+                    "purchase_page",
+                    "no_item_selected_text",
+                    default="Select a product to view details"
+                ),
+                font=theme.font(22, "bold"),
+                text_color=theme.MUTED,
+                justify="center",
+                wraplength=500
             )
+            self.empty_order_label.place(relx=0.5, rely=0.5, anchor="center")
             self.pay_btn.configure(state="disabled")
             self.scan_btn.configure(state="disabled")
             return
@@ -492,25 +557,70 @@ class PurchasePage(ctk.CTkFrame):
         discount_value = float(self.discount or 0)
         discount_text = "-" if discount_value <= 0 else f"{discount_value:.0f}%"
         total = price * (1 - discount_value / 100.0)
-        stock = int(self.selected_product.get("stock", 0))
 
         item_label = config.get("purchase_page", "summary_item_label", default="Item")
         type_label = config.get("purchase_page", "summary_type_label", default="Type")
-        amount_label = config.get("purchase_page", "summary_amount_label", default="Amount")
         discount_label = config.get("purchase_page", "summary_discount_label", default="Discount")
         total_label = config.get("purchase_page", "summary_total_label", default="Total Price")
-        stock_label = config.get("purchase_page", "summary_stock_label", default="Stock")
 
-        self.order_text.configure(
-            text=(
-                f"{item_label}: {self.selected_product['name']}\n\n"
-                f"{type_label}: {self.selected_product['type']}\n\n"
-                f"{amount_label}: ₱{price:.2f}\n\n"
-                f"{discount_label}: {discount_text}\n\n"
-                f"{total_label}: ₱{total:.2f}\n\n"
-                f"{stock_label}: {stock}"
-            ),
-            text_color="#999999",
+        content_wrap = ctk.CTkFrame(
+            self.order_content,
+            fg_color="transparent"
+        )
+        content_wrap.place(
+            relx=0.5,
+            rely=0.5,
+            anchor="center",
+            relwidth=0.92
+        )
+
+        header = ctk.CTkLabel(
+            content_wrap,
+            text="Selected Product",
+            font=theme.font(20, "bold"),
+            text_color=theme.ORANGE,
+            fg_color="transparent"
+        )
+        header.pack(anchor="w", padx=10, pady=(0, 10))
+
+        self._make_summary_row(
+            content_wrap,
+            item_label,
+            str(self.selected_product["name"]),
+            value_color=theme.BLACK
+        )
+        self._make_summary_row(
+            content_wrap,
+            type_label,
+            str(self.selected_product["type"]),
+            value_color=theme.BLACK
+        )
+
+        self._make_divider(content_wrap)
+
+        discount_color = theme.SUCCESS if discount_value > 0 else theme.MUTED
+
+        self._make_summary_row(
+            content_wrap,
+            discount_label,
+            discount_text,
+            value_color=discount_color
+        )
+        self._make_summary_row(
+            content_wrap,
+            "Quantity",
+            "1 pc",
+            value_color=theme.BLACK
+        )
+
+        self._make_divider(content_wrap)
+
+        self._make_summary_row(
+            content_wrap,
+            total_label,
+            f"₱{total:.2f}",
+            value_color=theme.ORANGE,
+            large=True
         )
 
         is_available = bool(self.selected_product.get("available", False))
@@ -672,7 +782,7 @@ class PurchasePage(ctk.CTkFrame):
             self.last_scanned_token = scanned
             self.validation_in_progress = True
 
-            if self.listener:   
+            if self.listener:
                 self.listener.stop()
                 self.listener = None
 
@@ -796,10 +906,21 @@ class PurchasePage(ctk.CTkFrame):
             if isinstance(tile, ProductTile):
                 tile.set_selected(False)
 
-        self.order_text.configure(
-            text=config.get("purchase_page", "no_item_selected_text", default="No item selected"),
-            text_color=theme.MUTED
+        self._clear_order_content()
+        self.empty_order_label = ctk.CTkLabel(
+            self.order_content,
+            text=config.get(
+                "purchase_page",
+                "no_item_selected_text",
+                default="Select a product to view details"
+            ),
+            font=theme.font(22, "bold"),
+            text_color=theme.MUTED,
+            justify="center",
+            wraplength=500
         )
+        self.empty_order_label.place(relx=0.5, rely=0.5, anchor="center")
+
         self.status_label.configure(text="", text_color=theme.ERROR)
         self.pay_btn.configure(state="disabled")
         self.scan_btn.configure(state="disabled")
