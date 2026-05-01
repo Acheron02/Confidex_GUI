@@ -84,7 +84,9 @@
     "back_loading_text": "Returning to payment options",
     "max_digits": 4,
     "stock_ratio_limit": 0.3,
-    "cost_ratio_limit": 0.3
+    "cost_ratio_limit": 0.3,
+    "exact_only_threshold": 500,
+    "max_change_coins": 30
   },
   "cash_payment_page": {
     "header_title": "Cash Payment",
@@ -253,12 +255,16 @@
     "header_title": "Instructions",
     "title": "HOW TO USE THE TEST KIT",
     "description": "Watch the tutorial video or proceed to insert the used test kit when ready.",
-    "play_video_button_text": "Play Video Tutorial",
     "insert_kit_button_text": "Insert Used Test Kit",
+    "continue_text": "Continue",
     "video_play_text": "Play",
     "video_pause_text": "Pause",
     "video_stop_text": "Stop",
-    "next_loading_text": "Preparing reverse vending machine"
+    "next_loading_text": "Preparing reverse vending machine",
+    "video_map": {
+      "HIV123": "assets/videos/hiv_kit_tut.mp4",
+      "DENGUE123": "assets/videos/dengue_kit_tut.mp4"
+    }
   },
   "kit_insertion_page": {
     "header_title": "Reverse Vending Machine",

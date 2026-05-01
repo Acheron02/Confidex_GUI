@@ -9,6 +9,9 @@ from config_manager import config
 
 class CashBillCheckPage(ctk.CTkFrame):
     REFRESH_MS = 1500
+    DEFAULT_ACCEPTED_BILLS = [50, 100, 200, 500, 1000]
+    DEFAULT_EXACT_ONLY_THRESHOLD = 500
+    DEFAULT_MAX_CHANGE_COINS = 20
 
     def __init__(self, master, controller):
         super().__init__(master, fg_color=theme.CREAM)
@@ -78,7 +81,6 @@ class CashBillCheckPage(ctk.CTkFrame):
         left_body.grid_columnconfigure(0, weight=1)
         left_body.grid_rowconfigure(0, weight=1)
 
-        # Center the whole content block vertically and horizontally
         self.left_center_wrap = ctk.CTkFrame(left_body, fg_color=theme.WHITE)
         self.left_center_wrap.grid(row=0, column=0, sticky="nsew", padx=16, pady=16)
         self.left_center_wrap.grid_columnconfigure(0, weight=1)
@@ -96,7 +98,7 @@ class CashBillCheckPage(ctk.CTkFrame):
 
         self.title_label = ctk.CTkLabel(
             self.header_block,
-            text=config.get("cash_bill_check_page", "prompt_title", default="Enter the Amount of Bill"),
+            text=config.get("cash_bill_check_page", "prompt_title", default="Enter the Amount of Bills"),
             font=theme.heavy(28),
             text_color=theme.BLACK,
             fg_color=theme.WHITE,
@@ -110,7 +112,7 @@ class CashBillCheckPage(ctk.CTkFrame):
             text=config.get(
                 "cash_bill_check_page",
                 "helper_text",
-                default="Type the bill value you plan to insert."
+                default="Enter the total amount you plan to insert using accepted bills only."
             ),
             font=theme.font(15, "bold"),
             text_color=theme.MUTED,
@@ -191,7 +193,7 @@ class CashBillCheckPage(ctk.CTkFrame):
         )
         self.message_card.grid(row=4, column=0, padx=10, pady=(0, 14), sticky="ew")
         self.message_card.grid_propagate(False)
-        self.message_card.configure(height=112)
+        self.message_card.configure(height=132)
         self.message_card.grid_columnconfigure(0, weight=1)
         self.message_card.grid_rowconfigure(0, weight=1)
 
@@ -210,7 +212,6 @@ class CashBillCheckPage(ctk.CTkFrame):
         )
         self.message_label.grid(row=0, column=0, padx=18, pady=16, sticky="nsew")
 
-        # Warning / info area
         self.warning_card = ctk.CTkFrame(
             self.left_center_wrap,
             fg_color=theme.CREAM,
@@ -221,15 +222,11 @@ class CashBillCheckPage(ctk.CTkFrame):
 
         self.warning_label = ctk.CTkLabel(
             self.warning_card,
-            text=(
-                "• Bills only\n"
-                "• Enough amount required\n"
-                "• Exact change only"
-            ),
+            text="",
             font=theme.font(14, "bold"),
             text_color=theme.MUTED,
             fg_color=theme.CREAM,
-            wraplength=320,
+            wraplength=380,
             justify="left",
             anchor="center"
         )
@@ -276,7 +273,7 @@ class CashBillCheckPage(ctk.CTkFrame):
 
             inner_w = max(260, card_w - 68)
             self.input_card.configure(width=inner_w, height=132)
-            self.message_card.configure(width=inner_w, height=112)
+            self.message_card.configure(width=inner_w, height=132)
         except Exception:
             pass
 
@@ -289,13 +286,13 @@ class CashBillCheckPage(ctk.CTkFrame):
                 text=config.get("cash_bill_check_page", "title", default="ENTER CASH AMOUNT")
             )
             self.title_label.configure(
-                text=config.get("cash_bill_check_page", "prompt_title", default="Enter the Amount of Bill")
+                text=config.get("cash_bill_check_page", "prompt_title", default="Enter the Amount of Bills")
             )
             self.helper_label.configure(
                 text=config.get(
                     "cash_bill_check_page",
                     "helper_text",
-                    default="Type the bill value you plan to insert."
+                    default="Enter the total amount you plan to insert using accepted bills only."
                 )
             )
         except Exception as e:
@@ -329,6 +326,7 @@ class CashBillCheckPage(ctk.CTkFrame):
                 theme.ERROR,
                 auto_hide_ms=None
             )
+            self._update_warning_style(total=0)
             self.after(50, self._focus_entry)
             return
 
@@ -343,6 +341,10 @@ class CashBillCheckPage(ctk.CTkFrame):
             summary_lines.append(
                 f"{config.get('cash_bill_check_page', 'summary_discount_label', default='Discount')}: {float(self.discount):.0f}%"
             )
+
+        summary_lines.append(
+            f"Accepted bills: {', '.join(f'₱{b}' for b in self._accepted_bills())}"
+        )
 
         self.summary_label.configure(
             text="\n".join(summary_lines),
@@ -359,6 +361,7 @@ class CashBillCheckPage(ctk.CTkFrame):
             auto_hide_ms=None
         )
 
+        self._update_warning_style(total=total)
         self.after(50, self._focus_entry)
 
     def _focus_entry(self):
@@ -399,12 +402,66 @@ class CashBillCheckPage(ctk.CTkFrame):
         price = float(self.selected_product.get("price", 0) or 0)
         return price * (1 - float(self.discount or 0) / 100.0)
 
-    def _total_change_stock_value(self):
-        total = 0
-        for coin in config.get_coin_inventory():
-            if coin.get("enabled", True):
-                total += int(coin.get("denomination", 0)) * int(coin.get("stock", 0))
-        return total
+    def _accepted_bills(self):
+        raw = config.get("payment", "accepted_bills", default=self.DEFAULT_ACCEPTED_BILLS)
+        cleaned = []
+
+        for value in raw or []:
+            try:
+                bill = int(value)
+                if bill > 0:
+                    cleaned.append(bill)
+            except Exception:
+                pass
+
+        cleaned = sorted(set(cleaned))
+        return cleaned or self.DEFAULT_ACCEPTED_BILLS
+
+    def _exact_only_threshold(self):
+        try:
+            return int(config.get(
+                "cash_bill_check_page",
+                "exact_only_threshold",
+                default=self.DEFAULT_EXACT_ONLY_THRESHOLD
+            ))
+        except Exception:
+            return self.DEFAULT_EXACT_ONLY_THRESHOLD
+
+    def _coin_inventory_records(self):
+        coins_raw = config.get_coin_inventory()
+        records = []
+
+        if isinstance(coins_raw, dict):
+            for denom_key, data in coins_raw.items():
+                try:
+                    denomination = int(denom_key)
+                    stock = int((data or {}).get("stock", 0))
+                    enabled = bool((data or {}).get("enabled", True))
+                    if enabled and denomination > 0 and stock > 0:
+                        records.append({
+                            "denomination": denomination,
+                            "stock": stock,
+                            "enabled": enabled,
+                        })
+                except Exception:
+                    pass
+
+        elif isinstance(coins_raw, list):
+            for coin in coins_raw:
+                try:
+                    denomination = int(coin.get("denomination", 0))
+                    stock = int(coin.get("stock", 0))
+                    enabled = bool(coin.get("enabled", True))
+                    if enabled and denomination > 0 and stock > 0:
+                        records.append({
+                            "denomination": denomination,
+                            "stock": stock,
+                            "enabled": enabled,
+                        })
+                except Exception:
+                    pass
+
+        return sorted(records, key=lambda x: x["denomination"], reverse=True)
 
     def _current_amount(self):
         raw = self.amount_var.get().strip()
@@ -471,8 +528,132 @@ class CashBillCheckPage(ctk.CTkFrame):
         )
         self._focus_entry()
 
+    def _can_compose_amount_from_accepted_bills(self, amount):
+        if amount < 0:
+            return False
+
+        accepted = self._accepted_bills()
+        reachable = [False] * (amount + 1)
+        reachable[0] = True
+
+        for current in range(amount + 1):
+            if not reachable[current]:
+                continue
+            for bill in accepted:
+                nxt = current + bill
+                if nxt <= amount:
+                    reachable[nxt] = True
+
+        return reachable[amount]
+
+    def _build_bill_combo(self, amount):
+        accepted = sorted(self._accepted_bills(), reverse=True)
+        remaining = amount
+        combo = {}
+
+        for bill in accepted:
+            if remaining <= 0:
+                break
+            count = remaining // bill
+            if count > 0:
+                combo[bill] = count
+                remaining -= bill * count
+
+        if remaining != 0:
+            return None
+        return combo
+
+    def _compute_change_breakdown_local(self, change_amount):
+        if change_amount < 0:
+            return None
+        if change_amount == 0:
+            return {}
+
+        coins = self._coin_inventory_records()
+        remaining = int(change_amount)
+        breakdown = {}
+
+        for coin in coins:
+            denom = int(coin["denomination"])
+            stock = int(coin["stock"])
+
+            if denom <= 0 or stock <= 0:
+                continue
+
+            use_count = min(stock, remaining // denom)
+            if use_count > 0:
+                breakdown[denom] = use_count
+                remaining -= use_count * denom
+
+        if remaining != 0:
+            return None
+
+        return breakdown
+
+    def _count_change_coins(self, breakdown):
+        if not breakdown:
+            return 0
+        return sum(int(v) for v in breakdown.values())
+
+    def _format_bill_combo(self, combo):
+        if not combo:
+            return "N/A"
+        parts = []
+        for bill in sorted(combo.keys(), reverse=True):
+            count = combo[bill]
+            if count > 0:
+                parts.append(f"{count}×₱{bill}")
+        return ", ".join(parts)
+
+    def _format_change_breakdown(self, breakdown):
+        if breakdown is None:
+            return "N/A"
+        if not breakdown:
+            return "No change needed"
+        parts = []
+        for denom in sorted(breakdown.keys(), reverse=True):
+            count = breakdown[denom]
+            if count > 0:
+                parts.append(f"{count}×₱{denom}")
+        return ", ".join(parts)
+
+    def _update_warning_style(self, total):
+        threshold = self._exact_only_threshold()
+
+        if int(round(total)) >= threshold:
+            warning_bg = "#FBE3E0"
+            self.warning_card.configure(fg_color=warning_bg)
+            self.warning_label.configure(
+                text=(
+                    "HIGH AMOUNT PURCHASE\n"
+                    "EXACT AMOUNT ONLY\n\n"
+                    "Please insert the exact total using accepted bills.\n"
+                    "Change may not be available for this purchase."
+                ),
+                text_color=theme.ERROR,
+                fg_color=warning_bg,
+                font=theme.font(18, "bold"),
+                wraplength=360,
+                justify="center",
+            )
+        else:
+            self.warning_card.configure(fg_color=theme.CREAM)
+            self.warning_label.configure(
+                text=(
+                    "• You may enter an exact total like ₱150 (₱100 + ₱50)\n"
+                    "• Larger amounts are accepted only if exact change can be given"
+                ),
+                text_color=theme.MUTED,
+                fg_color=theme.CREAM,
+                font=theme.font(14, "bold"),
+                wraplength=360,
+                justify="left",
+            )
+
     def _validate_amount(self, amount):
         total = self._compute_total()
+        total_int = int(round(total))
+        threshold = self._exact_only_threshold()
 
         if amount <= 0:
             return False, config.get(
@@ -481,41 +662,69 @@ class CashBillCheckPage(ctk.CTkFrame):
                 default="Please enter a valid cash amount."
             )
 
-        if amount < total:
+        if not self._can_compose_amount_from_accepted_bills(amount):
+            accepted_text = ", ".join(f"₱{b}" for b in self._accepted_bills())
             return False, (
-                f"₱{amount:.2f} "
-                f"{config.get('cash_bill_check_page', 'insufficient_amount_suffix', default='is not enough for this purchase.')}\n"
-                f"{config.get('cash_bill_check_page', 'enter_equal_or_greater_prefix', default='Please enter an amount equal to or greater than')} ₱{total:.2f}."
+                f"Entered amount cannot be formed using accepted bills only.\n"
+                f"Accepted bills: {accepted_text}\n"
+                f"Examples: ₱150 = ₱100 + ₱50, ₱250 = ₱200 + ₱50."
             )
 
-        change_needed = float(amount) - float(total)
-
-        stock_ratio_limit = float(config.get("cash_bill_check_page", "stock_ratio_limit", default=0.30))
-        cost_ratio_limit = float(config.get("cash_bill_check_page", "cost_ratio_limit", default=0.30))
-
-        stock_limit = self._total_change_stock_value() * stock_ratio_limit
-        cost_limit = total * cost_ratio_limit
-
-        breakdown = config.compute_change_breakdown(int(change_needed)) if change_needed.is_integer() else None
-
-        if breakdown is None and change_needed > 0:
-            return False, config.get(
-                "cash_bill_check_page",
-                "cannot_make_change_text",
-                default="Cannot provide exact change for this bill."
+        if amount < total_int:
+            return False, (
+                f"₱{amount:.2f} is not enough for this purchase.\n"
+                f"Please enter an amount equal to or greater than ₱{total:.2f}."
             )
 
-        if change_needed > stock_limit or change_needed > cost_limit:
-            return False, config.get(
-                "cash_bill_check_page",
-                "bill_too_large_text",
-                default="Bill is too large. Insert a smaller bill."
+        if total_int >= threshold:
+            if amount != total_int:
+                return False, (
+                    f"HIGH AMOUNT PURCHASE\n"
+                    f"Please insert the exact amount only.\n\n"
+                    f"Total to pay: ₱{total_int:.2f}\n"
+                    f"Entered amount: ₱{amount:.2f}\n\n"
+                    f"Change may not be available for this purchase."
+                )
+
+            bill_combo = self._build_bill_combo(amount)
+            return True, (
+                f"HIGH AMOUNT PURCHASE\n"
+                f"Exact amount confirmed.\n\n"
+                f"Entered amount: ₱{amount:.2f}\n"
+                f"Planned bills: {self._format_bill_combo(bill_combo)}\n\n"
+                f"Amount accepted. Proceeding to cash payment..."
             )
+
+        change_needed = int(round(amount - total_int))
+        change_breakdown = self._compute_change_breakdown_local(change_needed)
+
+        if change_needed > 0 and change_breakdown is None:
+            return False, (
+                f"Exact change for ₱{change_needed:.2f} cannot be provided with the current coin inventory.\n"
+                f"Please enter a smaller valid amount."
+            )
+
+        max_change_coins = int(
+            config.get("cash_bill_check_page", "max_change_coins", default=self.DEFAULT_MAX_CHANGE_COINS)
+        )
+        change_coin_count = self._count_change_coins(change_breakdown)
+
+        if change_needed > 0 and change_coin_count > max_change_coins:
+            return False, (
+                f"Entered amount is too large for a practical change dispense.\n"
+                f"Expected change: ₱{change_needed:.2f}\n"
+                f"Change would require {change_coin_count} coins, which exceeds the limit of {max_change_coins}.\n"
+                f"Please enter a smaller valid amount."
+            )
+
+        bill_combo = self._build_bill_combo(amount)
 
         return True, (
-            f"{config.get('cash_bill_check_page', 'entered_amount_label', default='Entered amount')}: ₱{amount:.2f}\n"
-            f"{config.get('cash_bill_check_page', 'expected_change_label', default='Expected change')}: ₱{change_needed:.2f}\n\n"
-            f"{config.get('cash_bill_check_page', 'accepted_message', default='Amount accepted. Proceeding to cash payment...')}"
+            f"Entered amount: ₱{amount:.2f}\n"
+            f"Planned bills: {self._format_bill_combo(bill_combo)}\n"
+            f"Expected change: ₱{change_needed:.2f}\n"
+            f"Change breakdown: {self._format_change_breakdown(change_breakdown)}\n\n"
+            f"Amount accepted. Proceeding to cash payment..."
         )
 
     def submit_amount(self):
@@ -531,7 +740,7 @@ class CashBillCheckPage(ctk.CTkFrame):
         is_valid, message = self._validate_amount(amount)
 
         if not is_valid:
-            self._set_message(message, theme.ERROR, auto_hide_ms=3000)
+            self._set_message(message, theme.ERROR, auto_hide_ms=4000)
             self._focus_entry()
             return
 

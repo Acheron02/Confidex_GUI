@@ -1,23 +1,23 @@
 {
   "products": {
     "HIV123": {
-      "stock": 15
+      "stock": 90
     },
     "DENGUE123": {
-      "stock": 45
+      "stock": 99
     }
   },
   "coins": {
     "1": {
-      "stock": 94,
+      "stock": 100,
       "enabled": true
     },
     "5": {
-      "stock": 64,
+      "stock": 98,
       "enabled": true
     },
     "20": {
-      "stock": 0,
+      "stock": 98,
       "enabled": true
     }
   }

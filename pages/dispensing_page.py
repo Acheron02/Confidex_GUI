@@ -1,4 +1,5 @@
 import threading
+
 from frontend import tk_compat as ctk
 from frontend import theme
 from frontend.widgets import AppShell, RoundedCard, card_body
@@ -264,6 +265,11 @@ class DispensingPage(ctk.CTkFrame):
                 )
             )
         else:
+            error_message = message or config.get(
+                "dispensing_page",
+                "failed_status_text",
+                default="Failed to dispense item."
+            )
             self.message_label.configure(
                 text=config.get(
                     "dispensing_page",
@@ -272,14 +278,13 @@ class DispensingPage(ctk.CTkFrame):
                 ),
                 text_color=theme.ERROR
             )
-            self.status_label.configure(
-                text=message or config.get(
-                    "dispensing_page",
-                    "failed_status_text",
-                    default="Failed to dispense item."
-                ),
-                text_color=theme.ERROR
-            )
+            self.status_label.configure(text=error_message, text_color=theme.ERROR)
+
+            if hasattr(self.controller, "show_error"):
+                self.controller.show_error(
+                    f"Dispensing failed.\n{error_message}",
+                    title="Dispensing Error"
+                )
 
     def _on_dispense_error(self, error_message):
         self.processing = False
@@ -297,6 +302,12 @@ class DispensingPage(ctk.CTkFrame):
             text=f"{config.get('dispensing_page', 'error_prefix', default='Error:')} {error_message}",
             text_color=theme.ERROR
         )
+
+        if hasattr(self.controller, "show_error"):
+            self.controller.show_error(
+                f"Dispensing failed.\n{error_message}",
+                title="Dispensing Error"
+            )
 
     def start_animation(self):
         self.stop_animation()

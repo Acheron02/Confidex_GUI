@@ -220,6 +220,24 @@ class OnlinePaymentPage(ctk.CTkFrame):
         except Exception:
             pass
 
+    def _reset_state(self):
+        self.payment_session_id = None
+        self.payment_checkout_url = None
+        self.payment_reference = None
+        self.payment_amount = 0
+        self.payment_status = None
+        self.payment_mode = "test"
+        self.simulated = True
+        self.website_transaction_id = None
+        self.request_in_progress = False
+        self.status_request_in_progress = False
+        self.redirecting_to_cash = False
+        self.finalizing_purchase = False
+        self.status_error_count = 0
+        self.refresh_btn.configure(state="normal")
+        self.cancel_btn.configure(state="normal")
+        self.back_btn.configure(state="normal")
+
     def update_data(self, user_data=None, selected_product=None, discount=0, **kwargs):
         self._stop_polling()
         self._cancel_redirect()
@@ -400,7 +418,9 @@ class OnlinePaymentPage(ctk.CTkFrame):
         try:
             self._render_qr(checkout_url)
         except Exception as e:
-            self._redirect_to_cash_with_error(f"{config.get('online_payment_page', 'render_qr_error_prefix', default='Unable to render QR code.')} {e}")
+            self._redirect_to_cash_with_error(
+                f"{config.get('online_payment_page', 'render_qr_error_prefix', default='Unable to render QR code.')} {e}"
+            )
             return
 
         if self.payment_mode == "test":
@@ -424,7 +444,7 @@ class OnlinePaymentPage(ctk.CTkFrame):
                 text=config.get(
                     "online_payment_page",
                     "waiting_simulated_text",
-                    default="Waiting for simulated payment confirmation..."
+                    default="Waiting for simulated payment confirmation."
                 ),
                 text_color=theme.ORANGE
             )
@@ -433,7 +453,7 @@ class OnlinePaymentPage(ctk.CTkFrame):
                 text=config.get(
                     "online_payment_page",
                     "waiting_payment_text",
-                    default="Waiting for payment confirmation..."
+                    default="Waiting for payment confirmation."
                 ),
                 text_color=theme.ORANGE
             )
@@ -572,8 +592,7 @@ class OnlinePaymentPage(ctk.CTkFrame):
         if status in ("failed", "expired", "cancelled"):
             print(f"[PAYMONGO] Payment ended with status: {status}", flush=True)
             self._redirect_to_cash_with_error(
-                f"{config.get('online_payment_page', 'online_payment_prefix', default='Online payment')} {status}. "
-                f"{config.get('online_payment_page', 'redirecting_cash_suffix', default='Redirecting to cash payment...')}"
+                f"{config.get('online_payment_page', 'payment_failed_prefix', default='Payment failed with status:')} {status}"
             )
             return
 
@@ -582,7 +601,7 @@ class OnlinePaymentPage(ctk.CTkFrame):
                 text=config.get(
                     "online_payment_page",
                     "waiting_simulated_text",
-                    default="Waiting for simulated payment confirmation..."
+                    default="Waiting for simulated payment confirmation."
                 ),
                 text_color=theme.ORANGE
             )
@@ -591,14 +610,14 @@ class OnlinePaymentPage(ctk.CTkFrame):
                 text=config.get(
                     "online_payment_page",
                     "waiting_payment_text",
-                    default="Waiting for payment confirmation..."
+                    default="Waiting for payment confirmation."
                 ),
                 text_color=theme.ORANGE
             )
 
         self._start_polling()
 
-    def _handle_status_error(self, token, error_message, manual=False):
+    def _handle_status_error(self, token, error_message, manual):
         self.status_request_in_progress = False
 
         if self._is_stale(token) or self.redirecting_to_cash:
@@ -621,7 +640,7 @@ class OnlinePaymentPage(ctk.CTkFrame):
                     text=config.get(
                         "online_payment_page",
                         "status_timeout_retrying_text",
-                        default="Status check timed out. Retrying..."
+                        default="Status check timed out. Retrying."
                     ),
                     text_color=theme.ERROR
                 )
@@ -647,7 +666,7 @@ class OnlinePaymentPage(ctk.CTkFrame):
         self.status_label.configure(
             text=(
                 f"{error_message}\n"
-                f"{config.get('online_payment_page', 'redirecting_cash_suffix', default='Redirecting to cash payment...')}"
+                f"{config.get('online_payment_page', 'redirecting_cash_suffix', default='Redirecting to cash payment.')}"
             ),
             text_color=theme.ERROR
         )
@@ -657,6 +676,12 @@ class OnlinePaymentPage(ctk.CTkFrame):
         self.refresh_btn.configure(state="disabled")
         self.cancel_btn.configure(state="disabled")
         self.back_btn.configure(state="disabled")
+
+        if hasattr(self.controller, "show_error"):
+            self.controller.show_error(
+                f"Online payment failed.\n{error_message}",
+                title="Online Payment Error"
+            )
 
         self.redirect_job = self.after(self._error_redirect_delay_ms(), self._go_to_cash_payment)
 
@@ -773,79 +798,45 @@ class OnlinePaymentPage(ctk.CTkFrame):
             return
 
         self.finalizing_purchase = False
-        print(f"[PAYMONGO] Transaction save failed: {error_message}", flush=True)
-
-        self.status_label.configure(
-            text=(
-                f"{config.get('online_payment_page', 'payment_confirmed_but_failed_text', default='Payment confirmed, but saving transaction failed.')}\n"
-                f"{error_message}\n"
-                f"{config.get('online_payment_page', 'refresh_once_text', default='Please try refreshing status once.')}"
-            ),
-            text_color=theme.ERROR
-        )
-
         self.refresh_btn.configure(state="normal")
         self.cancel_btn.configure(state="normal")
         self.back_btn.configure(state="normal")
+        self.status_label.configure(
+            text=f"{config.get('online_payment_page', 'save_failed_prefix', default='Failed to save transaction:')} {error_message}",
+            text_color=theme.ERROR
+        )
 
-    def cancel_and_go_back(self):
-        if self.redirecting_to_cash or self.finalizing_purchase:
+        if hasattr(self.controller, "show_error"):
+            self.controller.show_error(
+                f"Payment was confirmed, but saving the transaction failed.\n{error_message}",
+                title="Transaction Save Error"
+            )
+
+    def go_back(self):
+        if self.request_in_progress or self.status_request_in_progress or self.finalizing_purchase:
             return
 
         self._stop_polling()
         self._cancel_redirect()
-
-        self.checkout_request_token += 1
-        self.active_request_token = self.checkout_request_token
-
         self._reset_state()
 
         self.controller.show_loading_then(
             config.get(
                 "online_payment_page",
                 "back_loading_text",
-                default="Returning to payment methods"
+                default="Returning to payment options"
             ),
             "PaymentMethodPage",
-            delay=800,
+            delay=1000,
             user_data=self.user_data,
             selected_product=self.selected_product,
             discount=self.discount
         )
 
-    def go_back(self):
-        self.cancel_and_go_back()
-
-    def _reset_state(self):
-        self.payment_session_id = None
-        self.payment_checkout_url = None
-        self.payment_reference = None
-        self.payment_amount = 0
-        self.payment_status = None
-        self.payment_mode = "test"
-        self.simulated = True
-        self.website_transaction_id = None
-        self.qr_photo = None
-
-        self.request_in_progress = False
-        self.status_request_in_progress = False
-        self.redirecting_to_cash = False
-        self.finalizing_purchase = False
-        self.status_error_count = 0
-
-        self._clear_qr_display()
-        self.details_label.configure(text="")
-
-        try:
-            self.refresh_btn.configure(state="normal")
-            self.cancel_btn.configure(state="normal")
-            self.back_btn.configure(state="normal")
-        except Exception:
-            pass
+    def cancel_and_go_back(self):
+        self.go_back()
 
     def destroy(self):
         self._stop_polling()
         self._cancel_redirect()
-        self.checkout_request_token += 1
-        self.active_request_token = self.checkout_request_token
         super().destroy()

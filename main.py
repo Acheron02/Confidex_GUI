@@ -2,6 +2,8 @@ import os
 import sys
 import subprocess
 import time
+import threading
+import traceback
 from frontend import tk_compat as ctk
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -19,8 +21,9 @@ from pages.online_payment_page import OnlinePaymentPage
 from pages.dispensing_page import DispensingPage
 from pages.cash_bill_check_page import CashBillCheckPage
 from pages.change_dispensing_page import ChangeDispensingPage
+from frontend.components.error_dialog import ErrorDialog
 
-from backend.util.dispenser_serial import send_bill_off_command
+from backend.util.dispenser_serial import send_bill_off_command, send_raw_command
 from backend.device_sync import start_background_sync
 
 
@@ -48,6 +51,13 @@ def start_fastapi():
     except Exception as e:
         print(f"[FASTAPI] Failed to start: {e}", flush=True)
 
+def ensure_servos_reset():
+    try:
+        result = send_raw_command("RESET_SERVOS")
+        print(f"[STARTUP] RESET_SERVOS result: {result}", flush=True)
+    except Exception as e:
+        print(f"[STARTUP] Failed to reset servos to rest: {e}", flush=True)
+
 
 def ensure_bill_acceptor_off():
     try:
@@ -63,7 +73,13 @@ class App(ctk.CTk):
         self.title("CONFIDEX")
         self.configure(fg_color="#F5F2DE")
         self.frames = {}
+
         self.current_user = None
+        self.selected_product = None
+        self.current_transaction_id = None
+
+        self.current_error_dialog = None
+        self._is_resetting = False
 
         self.bind("<Escape>", lambda e: self.destroy())
 
@@ -95,6 +111,7 @@ class App(ctk.CTk):
             page.place(relx=0, rely=0, relwidth=1, relheight=1)
 
         self.show_frame("WelcomePage")
+        threading.excepthook = self._thread_exception_handler
 
     def enable_fullscreen(self):
         try:
@@ -111,8 +128,20 @@ class App(ctk.CTk):
     def show_frame(self, page_name, **kwargs):
         frame = self.frames.get(page_name)
         if not frame:
-            print(f"Frame '{page_name}' does not exist", flush=True)
+            print(f"[APP] Frame '{page_name}' does not exist", flush=True)
             return
+
+        # keep app-level state in sync
+        user_data = kwargs.get("user_data")
+        selected_product = kwargs.get("selected_product") or kwargs.get("product")
+        transaction_id = kwargs.get("transaction_id")
+
+        if user_data:
+            self.current_user = user_data
+        if selected_product:
+            self.selected_product = selected_product
+        if transaction_id:
+            self.current_transaction_id = transaction_id
 
         if hasattr(frame, "update_data"):
             try:
@@ -120,6 +149,16 @@ class App(ctk.CTk):
             except TypeError:
                 if kwargs:
                     print(f"update_data mismatch for {page_name}: {kwargs}", flush=True)
+            except Exception as e:
+                print(f"[APP] update_data failed for {page_name}: {e}", flush=True)
+                traceback.print_exc()
+                self.show_error(
+                    f"Failed to load {page_name}.\n{e}",
+                    title="Page Error",
+                    action_text="Reset System",
+                    on_action=self.full_reset,
+                )
+                return
 
         frame.tkraise()
 
@@ -132,6 +171,225 @@ class App(ctk.CTk):
             delay=delay,
         )
 
+    def close_error(self):
+        if self.current_error_dialog is not None:
+            try:
+                self.current_error_dialog.destroy()
+            except Exception:
+                pass
+            self.current_error_dialog = None
+
+    def show_error(
+        self,
+        message,
+        title="Something went wrong",
+        action_text="Reset System",
+        on_action=None,
+        on_close=None,
+    ):
+        print(f"[APP ERROR] {title}: {message}", flush=True)
+
+        if on_action is None:
+            on_action = self.full_reset
+
+        if on_close is None:
+            on_close = self._close_error_only
+
+        try:
+            if self.current_error_dialog is not None:
+                try:
+                    self.current_error_dialog.on_action = on_action
+                    self.current_error_dialog.on_close = on_close
+                    self.current_error_dialog.set_message(
+                        message,
+                        title=title,
+                        action_text=action_text,
+                    )
+                    self.current_error_dialog.lift()
+                    return
+                except Exception:
+                    try:
+                        self.current_error_dialog.destroy()
+                    except Exception:
+                        pass
+                    self.current_error_dialog = None
+
+            self.current_error_dialog = ErrorDialog(
+                self,
+                message=message,
+                title=title,
+                action_text=action_text,
+                on_action=on_action,
+                on_close=on_close,
+            )
+        except Exception as e:
+            print(f"[APP] Error dialog failed: {e}", flush=True)
+            traceback.print_exc()
+
+    def _close_error_only(self):
+        self.close_error()
+
+    def _call_page_method_if_exists(self, method_name):
+        for name, frame in self.frames.items():
+            method = getattr(frame, method_name, None)
+            if callable(method):
+                try:
+                    method()
+                except Exception as e:
+                    print(f"[APP] {name}.{method_name} failed: {e}", flush=True)
+
+    def _stop_runtime_activity(self):
+        cleanup_methods = [
+            "stop_camera",
+            "stop_video",
+            "_stop_polling",
+            "_cancel_redirect",
+            "stop_animation",
+            "stop_status_animation",
+            "hide_loading",
+            "disable_bill_acceptor",
+        ]
+        for method_name in cleanup_methods:
+            self._call_page_method_if_exists(method_name)
+
+        try:
+            result = send_bill_off_command()
+            print(f"[SYSTEM] BILL_OFF: {result}", flush=True)
+        except Exception as e:
+            print(f"[SYSTEM] BILL_OFF failed: {e}", flush=True)
+
+    def _reset_all_page_state(self):
+        for name, frame in self.frames.items():
+            if hasattr(frame, "reset_fields") and callable(frame.reset_fields):
+                try:
+                    frame.reset_fields()
+                except Exception as e:
+                    print(f"[APP] {name}.reset_fields failed: {e}", flush=True)
+
+            for attr, value in (
+                ("user_data", {}),
+                ("selected_product", None),
+                ("product", None),
+                ("discount", 0),
+                ("transaction_id", None),
+                ("transaction_in_progress", False),
+                ("loading_visible", False),
+                ("processing", False),
+                ("payment_session_id", None),
+                ("payment_checkout_url", None),
+                ("payment_reference", None),
+                ("payment_amount", 0),
+                ("payment_status", None),
+                ("request_in_progress", False),
+                ("status_request_in_progress", False),
+                ("redirecting_to_cash", False),
+                ("finalizing_purchase", False),
+                ("total_cash_inserted", 0),
+                ("website_transaction_id", None),
+            ):
+                if hasattr(frame, attr):
+                    try:
+                        setattr(frame, attr, value)
+                    except Exception:
+                        pass
+
+    def full_reset(self):
+        """
+        Full kiosk reset:
+        use for pre-payment or unsafe/fatal state.
+        This logs out the user and returns to WelcomePage.
+        """
+        if self._is_resetting:
+            return
+
+        self._is_resetting = True
+        print("[SYSTEM] FULL RESET", flush=True)
+
+        try:
+            self.close_error()
+            self._stop_runtime_activity()
+            self._reset_all_page_state()
+
+            self.current_user = None
+            self.selected_product = None
+            self.current_transaction_id = None
+
+            self.show_frame("WelcomePage")
+
+        except Exception as e:
+            print(f"[SYSTEM] Full reset failed: {e}", flush=True)
+            traceback.print_exc()
+        finally:
+            self._is_resetting = False
+
+    def recover_to_page(self, page_name, message=None, **kwargs):
+        """
+        Recover forward without logging the user out.
+        Use this after successful payment/dispense when flow must continue.
+        """
+        print(f"[SYSTEM] RECOVER TO PAGE -> {page_name}", flush=True)
+
+        try:
+            self.close_error()
+            self._stop_runtime_activity()
+
+            if "user_data" not in kwargs and self.current_user:
+                kwargs["user_data"] = self.current_user
+            if "selected_product" not in kwargs and self.selected_product:
+                kwargs["selected_product"] = self.selected_product
+            if "transaction_id" not in kwargs and self.current_transaction_id:
+                kwargs["transaction_id"] = self.current_transaction_id
+
+            if message:
+                self.show_loading_then(message, page_name, delay=700, **kwargs)
+            else:
+                self.show_frame(page_name, **kwargs)
+
+        except Exception as e:
+            print(f"[SYSTEM] Recover to page failed: {e}", flush=True)
+            traceback.print_exc()
+            self.full_reset()
+
+    def continue_after_success(self):
+        """
+        Default forward recovery after payment success.
+        If tutorial fails, continue to kit insertion.
+        """
+        self.recover_to_page(
+            "KitInsertionPage",
+            message="Continuing to kit insertion",
+        )
+
+    def report_callback_exception(self, exc, val, tb):
+        error_text = "".join(traceback.format_exception(exc, val, tb))
+        print("[TK CALLBACK ERROR]", error_text, flush=True)
+
+        self.show_error(
+            f"An unexpected application error occurred.\n\n{val}",
+            title="Application Error",
+            action_text="Reset System",
+            on_action=self.full_reset,
+        )
+
+    def _thread_exception_handler(self, args):
+        try:
+            error_text = "".join(
+                traceback.format_exception(args.exc_type, args.exc_value, args.exc_traceback)
+            )
+            print("[THREAD ERROR]", error_text, flush=True)
+
+            self.after(
+                0,
+                lambda: self.show_error(
+                    f"A background process failed.\n\n{args.exc_value}",
+                    title="Background Error",
+                    action_text="Reset System",
+                    on_action=self.full_reset,
+                ),
+            )
+        except Exception as e:
+            print(f"[APP] Thread exception handler failed: {e}", flush=True)
+
 
 if __name__ == "__main__":
     ctk.set_appearance_mode("light")
@@ -140,7 +398,7 @@ if __name__ == "__main__":
     time.sleep(1)
 
     ensure_bill_acceptor_off()
-
+    ensure_servos_reset()
     start_background_sync()
 
     app = App()

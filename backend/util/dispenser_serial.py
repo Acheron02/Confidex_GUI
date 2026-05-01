@@ -349,6 +349,28 @@ def _parse_change_dispensed_line(change_line: str):
 
     return result
 
+def send_raw_command(command: str, timeout=5):
+    """
+    Send a raw command to Arduino using the existing serial pipeline.
+    """
+    if not command.endswith("\n"):
+        command = command + "\n"
+
+    replies = _send_command_and_collect(command, timeout=timeout)
+
+    if not replies:
+        return {
+            "success": False,
+            "message": "No reply from Arduino",
+            "replies": [],
+        }
+
+    return {
+        "success": True,
+        "message": replies[-1],
+        "replies": replies,
+    }
+
 
 def _estimate_change_timeout(normalized: dict) -> int:
     """

@@ -26,14 +26,14 @@ PRINTER_LINE_WIDTH = 32
 #
 # For weak / gray prints, n2 is the most important.
 # These values are intentionally stronger than default.
-HEAT_DOTS = 7
+HEAT_DOTS = 10
 HEAT_TIME = 0xC8   # 200
 HEAT_INTERVAL = 0x02
 
 # Some clones respond to DC2 # n for density. Not all do.
 # Safe to try; ignored by unsupported units.
-PRINT_DENSITY = 10   # 0..15
-PRINT_BREAK_TIME = 2 # 0..7
+PRINT_DENSITY = 15   # 0..15
+PRINT_BREAK_TIME = 7 # 0..7
 
 # QR tuning
 QR_MODULE_SIZE = 7
@@ -355,27 +355,27 @@ def print_discount_qr(token: str, com_port=None, baud=DEFAULT_BAUD):
         _center(ser)
         _big(ser, True)
         _bold(ser, True)
-        _print_wrapped_line(ser, PRINTER_NAME, align="center", delay=0.06)
+        _print_wrapped_line(ser, PRINTER_NAME, align="center", delay=0.08)
 
         _normal(ser)
-        _print_wrapped_line(ser, EMAIL, align="center", delay=0.05)
+        _print_wrapped_line(ser, EMAIL, align="center", delay=0.08)
         _feed(ser, 1, 0.08)
 
         _bold(ser, True)
-        _print_wrapped_line(ser, "DISCOUNT COUPON", align="center", delay=0.05)
+        _print_wrapped_line(ser, "DISCOUNT COUPON", align="center", delay=0.08)
         _normal(ser)
-        _print_wrapped_line(ser, "Scan this QR on your next use", align="center", delay=0.05)
+        _print_wrapped_line(ser, "Scan this QR on your next use", align="center", delay=0.08)
         _feed(ser, 1, 0.08)
 
         print('[PRINTER] Printing QR-only coupon QR', flush=True)
         _print_qr(ser, token, module_size=QR_MODULE_SIZE, ec_level=QR_EC_LEVEL)
 
         print('[PRINTER] Printing QR-only coupon footer', flush=True)
-        _print_wrapped_line(ser, "This code is one-time use only", align="left", delay=0.04)
-        _print_wrapped_line(ser, "and will expire after 3 months.", align="left", delay=0.04)
-        _print_wrapped_line(ser, "Keep this paper for your next purchase.", align="left", delay=0.04)
+        _print_wrapped_line(ser, "This code is one-time use only", align="left", delay=0.08)
+        _print_wrapped_line(ser, "and will expire after 3 months.", align="left", delay=0.08)
+        _print_wrapped_line(ser, "Keep this paper for your next purchase.", align="left", delay=0.08)
         _feed(ser, 1, 0.08)
-        _print_wrapped_line(ser, f"Visit: {WEBSITE}", align="left", delay=0.04)
+        _print_wrapped_line(ser, f"Visit: {WEBSITE}", align="left", delay=0.08)
 
         _finalize_print(ser)
 
@@ -389,119 +389,6 @@ def print_discount_qr(token: str, com_port=None, baud=DEFAULT_BAUD):
     finally:
         if ser and ser.is_open:
             ser.close()
-
-
-def print_receipt_with_discount_qr(
-    token: str,
-    receipt_data: dict,
-    com_port=None,
-    baud=DEFAULT_BAUD
-):
-    """
-    Prints:
-    - CONFIDEX header
-    - purchase receipt details
-    - discount QR code
-    - coupon footer
-    """
-    ser = None
-    try:
-        ser = _open_printer_serial(com_port=com_port, baud=baud)
-        _init_printer(ser)
-
-        user = receipt_data.get('user', {})
-        purchase = receipt_data.get('purchase', {})
-        product = receipt_data.get('product', {})
-        amounts = receipt_data.get('amounts', {})
-        payment = receipt_data.get('payment', {})
-
-        transaction_id = _safe_text(receipt_data.get('transaction_id'))
-        username = _safe_text(user.get('username', 'User'))
-        user_id = _safe_text(user.get('user_id', 'Unknown'))
-        date_str = _safe_text(purchase.get('date'))
-        time_str = _safe_text(purchase.get('time'))
-
-        product_name = _safe_text(product.get('name', 'Unknown'))
-        product_id = _safe_text(product.get('product_id', 'Unknown'))
-        product_type = _safe_text(product.get('type', 'Unknown'))
-        price = _peso(product.get('price', 0))
-
-        discount_percent = _safe_text(amounts.get('discount_percent', 0))
-        total = _peso(amounts.get('total', 0))
-        total_paid = _peso(amounts.get('total_paid', 0))
-        change = _peso(amounts.get('change', 0))
-
-        mode_of_payment = _safe_text(payment.get('mode_of_payment', 'Cash'))
-
-        print('[PRINTER] Printing receipt header', flush=True)
-        _center(ser)
-        _big(ser, True)
-        _bold(ser, True)
-        _print_wrapped_line(ser, PRINTER_NAME, align="center", delay=0.06)
-
-        _normal(ser)
-        _print_wrapped_line(ser, EMAIL, align="center", delay=0.05)
-        _print_wrapped_line(ser, WEBSITE, align="center", delay=0.05)
-        _feed(ser, 1, 0.08)
-
-        _bold(ser, True)
-        _print_wrapped_line(ser, "PURCHASE RECEIPT", align="center", delay=0.05)
-        _normal(ser)
-        _print_separator(ser)
-
-        print('[PRINTER] Printing receipt details', flush=True)
-        details_lines = [
-            f"Transaction ID: {transaction_id}",
-            f"Username: {username}",
-            f"User ID: {user_id}",
-            f"Date: {date_str}",
-            f"Time: {time_str}",
-            "",
-            f"Item: {product_name}",
-            f"Product ID: {product_id}",
-            f"Type: {product_type}",
-            f"Price: {price}",
-            f"Discount: {discount_percent}%",
-            f"Total: {total}",
-            f"Paid: {total_paid}",
-            f"Change: {change}",
-            f"Payment: {mode_of_payment}",
-            "",
-        ]
-
-        for line in details_lines:
-            _print_wrapped_line(ser, line, align="left", delay=0.03)
-
-        _print_separator(ser)
-        _bold(ser, True)
-        _print_wrapped_line(ser, "DISCOUNT COUPON", align="center", delay=0.05)
-        _normal(ser)
-        _print_wrapped_line(ser, "Scan this QR on your next use", align="center", delay=0.05)
-        _feed(ser, 1, 0.08)
-
-        print('[PRINTER] Printing receipt QR', flush=True)
-        _print_qr(ser, token, module_size=QR_MODULE_SIZE, ec_level=QR_EC_LEVEL)
-
-        print('[PRINTER] Printing receipt footer', flush=True)
-        _print_wrapped_line(ser, "This code is one-time use only", align="left", delay=0.04)
-        _print_wrapped_line(ser, "and will expire after 3 months.", align="left", delay=0.04)
-        _print_wrapped_line(ser, "Keep this paper for your next purchase.", align="left", delay=0.04)
-        _feed(ser, 1, 0.08)
-        _print_wrapped_line(ser, f"Visit: {WEBSITE}", align="left", delay=0.04)
-
-        _finalize_print(ser)
-
-        print('[PRINTER] Receipt with discount QR printed successfully', flush=True)
-        return True
-
-    except Exception as e:
-        print(f'[PRINTER] Printer error: {e}', flush=True)
-        return False
-
-    finally:
-        if ser and ser.is_open:
-            ser.close()
-
 
 def debug_list_serial_devices():
     print("[SERIAL] Available serial devices:", flush=True)
